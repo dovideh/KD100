@@ -284,7 +284,7 @@ sudo make install
 ## Migration Guide
 
 ### For Existing Users:
-1. **Config Files**: New config format is backward compatible but adds `enable_uclogic:` option
+1. **Config Files**: New config format is NOT backward compatible as we now set Button explicity in the configuration file and we add `enable_uclogic:` option 
 2. **Build**: Use `make` as before, or `make debug` for better crash reporting
 3. **Running**: Add `--uclogic` flag if using with hid_uclogic module loaded
 
