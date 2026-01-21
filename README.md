@@ -317,4 +317,4 @@ The new architecture allows for:
 
 ---
 
-**Note**: The enhanced version maintains full backward compatibility with existing config files and usage patterns while providing significant improvements in stability and debugging capabilities.
+**Note**: The enhanced version maintains partial backward compatibility with existing config files.
