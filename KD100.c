@@ -1,9 +1,8 @@
 /*
-	V1.4.6
+	V1.4.8 - Leader Key System Fixed
 	https://github.com/mckset/KD100.git
 	KD100 Linux driver for X11 desktops
-	Enhanced version with button combination support
-	Allows holding multiple buttons to create keyboard shortcuts
+	Fixed leader key system with proper timing
 */
 
 #include <libusb-1.0/libusb.h>
@@ -15,8 +14,9 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <ctype.h>
+#include <sys/time.h>
 
-/* ===== CRASH HANDLER - Fixed version with proper address translation ===== */
+/* ===== CRASH HANDLER ===== */
 #ifdef DEBUG
 #include <execinfo.h>
 #include <signal.h>
@@ -26,7 +26,6 @@
 #include <string.h>
 #include <dlfcn.h>
 
-// Function to get base address of executable
 static void* get_base_address(void) {
     FILE *maps = fopen("/proc/self/maps", "r");
     if (!maps) return NULL;
@@ -55,7 +54,6 @@ void crash_handler(int sig) {
     fprintf(stderr, "\n⚠️  PROGRAM CRASHED! Signal: %d\n", sig);
     fprintf(stderr, "════════════════════════════════════════\n");
     
-    // Get stack trace
     size = backtrace(array, 50);
     strings = backtrace_symbols(array, size);
     
@@ -67,7 +65,6 @@ void crash_handler(int sig) {
         free(strings);
     }
     
-    // Get executable path
     char exe_path[1024];
     ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path)-1);
     if (len == -1) {
@@ -76,7 +73,6 @@ void crash_handler(int sig) {
         exe_path[len] = '\0';
     }
     
-    // Get base address to calculate offsets
     void *base_addr = get_base_address();
     
     fprintf(stderr, "\n=== Resolving line numbers ===\n");
@@ -84,7 +80,6 @@ void crash_handler(int sig) {
     fprintf(stderr, "Base address: %p\n", base_addr);
     
     for (size_t i = 0; i < size; i++) {
-        // Calculate file offset from runtime address
         void *file_offset = array[i];
         if (base_addr) {
             file_offset = (void*)((unsigned long)array[i] - (unsigned long)base_addr);
@@ -94,7 +89,6 @@ void crash_handler(int sig) {
         fprintf(stderr, "  Runtime address: %p\n", array[i]);
         fprintf(stderr, "  File offset:     %p\n", file_offset);
         
-        // Try addr2line with file offset
         char cmd[512];
         snprintf(cmd, sizeof(cmd), "addr2line -e '%s' -f -C -p %p 2>&1", 
                 exe_path, file_offset);
@@ -114,7 +108,6 @@ void crash_handler(int sig) {
             
             if (!has_output) {
                 fprintf(stderr, "  Could not resolve (trying raw address)\n");
-                // Try with raw address as fallback
                 snprintf(cmd, sizeof(cmd), "addr2line -e '%s' -f -C -p %p 2>&1", 
                         exe_path, array[i]);
                 system(cmd);
@@ -122,12 +115,11 @@ void crash_handler(int sig) {
         }
     }
     
-    // Alternative: Use gdb directly
     fprintf(stderr, "\n=== Using gdb to get line info ===\n");
     char gdb_cmd[512];
     snprintf(gdb_cmd, sizeof(gdb_cmd), 
             "gdb -q '%s' -ex 'info line *%p' -ex 'quit' 2>/dev/null | grep -E \"Line|at\"", 
-            exe_path, array[3]); // Try frame 3 (Handler)
+            exe_path, array[3]);
     system(gdb_cmd);
     
     fprintf(stderr, "\n════════════════════════════════════════\n");
@@ -146,11 +138,11 @@ void setup_crash_handler(void) {
 
 int keycodes[] = {1, 2, 4, 8, 16, 32, 64, 128, 129, 130, 132, 136, 144, 160, 192, 256, 257, 258, 260, 641, 642};
 char* file = "default.cfg";
-int enable_uclogic = 0; // Default: don't use hid_uclogic (compatible with OpenTabletDriver)
+int enable_uclogic = 0;
 
 typedef struct event event;
 typedef struct wheel wheel;
-typedef struct button_state button_state;
+typedef struct leader_state leader_state;
 
 struct event{
 	int type;
@@ -162,151 +154,200 @@ struct wheel {
 	char* left;
 };
 
-struct button_state {
-    int pressed_buttons[19];  // Track which buttons are currently pressed
-    int button_count;         // How many buttons are pressed
-    char* current_shortcut;   // Current combined shortcut
-    int shortcut_active;      // Whether a shortcut is currently active
+struct leader_state {
+    int leader_button;        // Which button is the leader (e.g., Button 16 for shift)
+    int leader_active;        // Is leader mode active?
+    int last_button;          // Last button pressed (for timing)
+    struct timeval leader_press_time; // When was leader pressed?
+    char* leader_function;    // What function does the leader have?
+    int timeout_ms;           // Leader timeout in milliseconds
 };
 
 void GetDevice(libusb_context*, int, int, int);
-void Handler(char*, int, int);  // Added debug parameter
-void process_button_combination(button_state*, event*, int);
-void clear_button_state(button_state*);
-void send_shortcut(button_state*, int);
+void Handler(char*, int, int);
+void process_leader_combination(leader_state*, event*, int, int);
+void reset_leader_state(leader_state*);
+void send_leader_combination(leader_state*, char*, int);
+int is_modifier_key(const char*);
+int find_button_index(int keycode);
 char* Substring(const char*, int, int);
 int is_module_loaded(const char* module_name);
 int try_hidraw_access();
 void print_compatibility_warning();
-int compare_ints(const void*, const void*);
-int is_modifier_key(const char*);
+long get_time_ms();
+long time_diff_ms(struct timeval start, struct timeval end);
+void trim_trailing_spaces(char* str);
 
 const int vid = 0x256c;
 const int pid = 0x006d;
 
-// Compare function for qsort
-int compare_ints(const void* a, const void* b) {
-    return (*(int*)a - *(int*)b);
+// Get current time in milliseconds
+long get_time_ms() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+}
+
+// Calculate time difference in milliseconds
+long time_diff_ms(struct timeval start, struct timeval end) {
+    long sec_diff = end.tv_sec - start.tv_sec;
+    long usec_diff = end.tv_usec - start.tv_usec;
+    return (sec_diff * 1000) + (usec_diff / 1000);
+}
+
+// Trim trailing spaces from a string
+void trim_trailing_spaces(char* str) {
+    if (str == NULL) return;
+    
+    int len = strlen(str);
+    while (len > 0 && isspace((unsigned char)str[len - 1])) {
+        str[len - 1] = '\0';
+        len--;
+    }
+}
+
+// Find button index from keycode
+int find_button_index(int keycode) {
+    for (int k = 0; k < 19; k++) {  // Only 0-17 for buttons, 18 is wheel button
+        if (keycodes[k] == keycode) {
+            return k;
+        }
+    }
+    return -1;
 }
 
 // Check if a key is a modifier
 int is_modifier_key(const char* key) {
     if (key == NULL) return 0;
     
-    // Common modifiers
     if (strcmp(key, "ctrl") == 0 || strcmp(key, "control") == 0 ||
         strcmp(key, "shift") == 0 ||
         strcmp(key, "alt") == 0 ||
-        strcmp(key, "super") == 0 || strcmp(key, "meta") == 0 ||
-        strcmp(key, "space") == 0) {  // Space can act as a modifier in some contexts
+        strcmp(key, "super") == 0 || strcmp(key, "meta") == 0) {
         return 1;
     }
     return 0;
 }
 
-// Clear button state
-void clear_button_state(button_state* state) {
-    state->button_count = 0;
-    if (state->current_shortcut != NULL) {
-        free(state->current_shortcut);
-        state->current_shortcut = NULL;
-    }
-    state->shortcut_active = 0;
+// Reset leader state
+void reset_leader_state(leader_state* state) {
+    state->leader_active = 0;
+    state->last_button = -1;
+    state->leader_press_time.tv_sec = 0;
+    state->leader_press_time.tv_usec = 0;
 }
 
-// Send shortcut command
-void send_shortcut(button_state* state, int debug) {
-    if (state->current_shortcut != NULL && strlen(state->current_shortcut) > 0) {
-        if (debug == 1) printf("Sending shortcut: %s\n", state->current_shortcut);
-        
-        if (state->shortcut_active) {
-            // Send keyup for previous shortcut
-            char cmd_up[512];
-            snprintf(cmd_up, sizeof(cmd_up), "xdotool keyup %s", state->current_shortcut);
-            system(cmd_up);
-            state->shortcut_active = 0;
+// Send leader combination
+void send_leader_combination(leader_state* state, char* combination, int debug) {
+    if (combination == NULL || strlen(combination) == 0) {
+        return;
+    }
+    
+    if (debug == 1) {
+        printf("Sending leader combination: %s\n", combination);
+    }
+    
+    // Send the combination
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "xdotool key %s", combination);
+    system(cmd);
+    
+    // Reset leader state after sending
+    reset_leader_state(state);
+}
+
+// Process leader key combinations
+void process_leader_combination(leader_state* state, event* events, int button_index, int debug) {
+    if (button_index < 0 || button_index >= 19) {
+        return;
+    }
+    
+    // Check if this is the wheel button (button 18) - should not be modified
+    if (button_index == 18) {
+        // Wheel button - handle normally without leader
+        if (events[button_index].function != NULL && 
+            strcmp(events[button_index].function, "swap") == 0) {
+            // Handle swap function
+            // (This would need wheel state tracking - implemented elsewhere)
         }
-        
-        // Send keydown for new shortcut
-        char cmd_down[512];
-        snprintf(cmd_down, sizeof(cmd_down), "xdotool keydown %s", state->current_shortcut);
-        system(cmd_down);
-        state->shortcut_active = 1;
+        reset_leader_state(state);
+        return;
     }
-}
-
-// Process button combination
-void process_button_combination(button_state* state, event* events, int debug) {
-    if (state->button_count == 0) {
-        // No buttons pressed, release any active shortcut
-        if (state->shortcut_active && state->current_shortcut != NULL) {
-            char cmd_up[512];
-            snprintf(cmd_up, sizeof(cmd_up), "xdotool keyup %s", state->current_shortcut);
-            system(cmd_up);
-            state->shortcut_active = 0;
+    
+    if (events[button_index].function == NULL) {
+        return;
+    }
+    
+    char* button_func = events[button_index].function;
+    
+    // Check if this button is configured as a leader
+    if (strcmp(button_func, "leader") == 0) {
+        // This button is the leader itself
+        if (!state->leader_active) {
+            // Activate leader mode
+            state->leader_active = 1;
+            gettimeofday(&state->leader_press_time, NULL);
+            state->last_button = button_index;
+            
+            if (debug == 1) {
+                printf("Leader mode activated by button %d\n", button_index);
+            }
+        } else {
+            // Leader pressed again - cancel leader mode
+            reset_leader_state(state);
+            if (debug == 1) {
+                printf("Leader mode cancelled\n");
+            }
         }
         return;
     }
     
-    // Sort pressed buttons to ensure consistent ordering
-    qsort(state->pressed_buttons, state->button_count, sizeof(int), compare_ints);
-    
-    // Build shortcut string based on pressed buttons
-    char shortcut[256] = "";
-    int has_non_modifier = 0;
-    
-    for (int i = 0; i < state->button_count; i++) {
-        int btn_index = state->pressed_buttons[i];
+    // Check if we're in leader mode
+    if (state->leader_active) {
+        // Calculate time since leader was pressed
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        long elapsed = time_diff_ms(state->leader_press_time, now);
         
-        if (btn_index >= 0 && btn_index < 19 && 
-            events[btn_index].function != NULL && 
-            strcmp(events[btn_index].function, "NULL") != 0) {
-            
-            // Check if this is a modifier key
-            if (is_modifier_key(events[btn_index].function)) {
-                // Add modifier with '+' if not first
-                if (strlen(shortcut) > 0) {
-                    strcat(shortcut, "+");
-                }
-                strcat(shortcut, events[btn_index].function);
-            } else {
-                // Regular key - mark that we have a non-modifier
-                has_non_modifier = 1;
-                if (strlen(shortcut) > 0) {
-                    strcat(shortcut, "+");
-                }
-                strcat(shortcut, events[btn_index].function);
+        if (elapsed > state->timeout_ms) {
+            // Leader timeout - reset
+            if (debug == 1) {
+                printf("Leader timeout (%ld ms > %d ms)\n", elapsed, state->timeout_ms);
             }
+            reset_leader_state(state);
+            // Fall through to normal button handling
+        } else {
+            // We have a leader combination!
+            // Format: leader_function + button_function
+            char combination[256] = "";
+            
+            if (state->leader_function != NULL && strlen(state->leader_function) > 0) {
+                strcpy(combination, state->leader_function);
+                strcat(combination, "+");
+            }
+            
+            strcat(combination, button_func);
+            
+            // Send the combination
+            send_leader_combination(state, combination, debug);
+            return; // Don't also handle as normal button
         }
     }
     
-    // Only send shortcut if we have at least one non-modifier key
-    // (or if we want to allow modifier-only shortcuts)
-    if (strlen(shortcut) > 0 && (has_non_modifier || state->button_count == 1)) {
-        // Check if shortcut changed
-        if (state->current_shortcut == NULL || strcmp(state->current_shortcut, shortcut) != 0) {
-            // Free old shortcut
-            if (state->current_shortcut != NULL) {
-                free(state->current_shortcut);
-            }
-            
-            // Store new shortcut
-            state->current_shortcut = strdup(shortcut);
-            if (state->current_shortcut == NULL) {
-                if (debug == 1) printf("Memory allocation failed for shortcut\n");
-                return;
-            }
-            
-            // Send the new shortcut
-            send_shortcut(state, debug);
-        }
-    } else if (state->shortcut_active) {
-        // No valid shortcut, release any active one
-        if (state->current_shortcut != NULL) {
-            char cmd_up[512];
-            snprintf(cmd_up, sizeof(cmd_up), "xdotool keyup %s", state->current_shortcut);
-            system(cmd_up);
-            state->shortcut_active = 0;
+    // Not in leader mode or leader timed out - handle normal button press
+    if (strcmp(button_func, "NULL") != 0 && strcmp(button_func, "swap") != 0 &&
+        strcmp(button_func, "mouse1") != 0 && strcmp(button_func, "mouse2") != 0 &&
+        strcmp(button_func, "mouse3") != 0 && strcmp(button_func, "mouse4") != 0 &&
+        strcmp(button_func, "mouse5") != 0) {
+        
+        if (events[button_index].type == 0) {
+            // Type 0: Key press
+            Handler(button_func, 0, debug);
+            usleep(10000); // Small delay
+            Handler(button_func, 1, debug);
+        } else if (events[button_index].type == 1) {
+            // Type 1: Run program/script
+            system(button_func);
         }
     }
 }
@@ -335,7 +376,6 @@ int try_hidraw_access() {
             FILE *f = fopen(path, "r");
             if (f) {
                 while (fgets(buf, sizeof(buf), f)) {
-                    // Check if this is our device (256c:006d)
                     if (strstr(buf, "VID=256C") && strstr(buf, "PID=006D")) {
                         snprintf(path, sizeof(path), "/dev/%s", ent->d_name);
                         fclose(f);
@@ -373,58 +413,58 @@ void print_compatibility_warning() {
 
 void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 	int err=0, wheelFunction=0, button=-1, totalButtons=0, wheelType=0, leftWheels=0, rightWheels=0, totalWheels=0;
-	char* data = malloc(512*sizeof(char)); // Data received from the config file and the USB
-	event* events = malloc(1*sizeof(event)); // Stores key events and functions
-	wheel* wheelEvents = malloc(1*sizeof(wheel)); // Stores wheel functions
+	char* data = malloc(512*sizeof(char));
+	event* events = malloc(1*sizeof(event));
+	wheel* wheelEvents = malloc(1*sizeof(wheel));
 	event prevEvent;
-	uid_t uid=getuid(); // Used to check if the driver was ran as root
+	uid_t uid=getuid();
 	
-	// Button state tracking for combinations
-	button_state btn_state = {0};
-	btn_state.current_shortcut = NULL;
-	btn_state.shortcut_active = 0;
-	btn_state.button_count = 0;
+	// Leader state tracking
+	leader_state leader = {0};
+	leader.leader_button = -1;  // Will be set from config
+	leader.leader_active = 0;
+	leader.last_button = -1;
+	leader.leader_press_time.tv_sec = 0;
+	leader.leader_press_time.tv_usec = 0;
+	leader.leader_function = NULL;
+	leader.timeout_ms = 1000;  // 1 second timeout for combinations
 
-	// Not important
-	int c=0; // Index of the loading character to display when waiting for a device
+	int c=0;
+	char indi[] = "|/-\\";
 
 	system("clear");
 
 	if (debug > 0){
 		if (debug > 2)
 			debug=2;
-		printf("Version 1.4.6 - Button Combination Support\n");
+		printf("Version 1.4.8 - Leader Key System (Fixed)\n");
 		printf("Debug level: %d\n", debug);
 	}		
 
 	// Load config file
-	if (debug == 1){
-		printf("Loading config...\n");
-	}
-	
 	FILE *f;
 	if (strcmp(file, "default.cfg")){
 		f = fopen(file, "r");
 		if (f == NULL){
-                        char* home = getpwuid(getuid())->pw_dir;
-                        char* config = "/.config/KD100/";
-                        char temp[strlen(home)+strlen(config)+strlen(file)+1];
-                        for (int i = 0; i < strlen(home); i++)
-                                temp[i] = home[i];
-                        for (int i = 0; i < strlen(config); i++)
-                                temp[i+strlen(home)] = config[i];
-                        for (int i = 0; i < strlen(file); i++)
-                                temp[i+strlen(home)+strlen(config)] = file[i];
-                        temp[strlen(home)+strlen(config)+strlen(file)] = '\0';
-                        f = fopen(temp, "r");
-                        if (f == NULL){
-                                printf("CONFIG FILE NOT FOUND\n");
-                                free(data);
-                                free(events);
-                                free(wheelEvents);
-                                return;
-                        }
-                }
+            char* home = getpwuid(getuid())->pw_dir;
+            char* config = "/.config/KD100/";
+            char temp[strlen(home)+strlen(config)+strlen(file)+1];
+            for (int i = 0; i < strlen(home); i++)
+                temp[i] = home[i];
+            for (int i = 0; i < strlen(config); i++)
+                temp[i+strlen(home)] = config[i];
+            for (int i = 0; i < strlen(file); i++)
+                temp[i+strlen(home)+strlen(config)] = file[i];
+            temp[strlen(home)+strlen(config)+strlen(file)] = '\0';
+            f = fopen(temp, "r");
+            if (f == NULL){
+                printf("CONFIG FILE NOT FOUND\n");
+                free(data);
+                free(events);
+                free(wheelEvents);
+                return;
+            }
+        }
 	}else{
 		f = fopen(file, "r");
 		if (f == NULL){
@@ -461,27 +501,21 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 	
 	// Parse config file
 	while (fgets(data, 512, f) != NULL) {
-	    // Remove trailing newline
 	    data[strcspn(data, "\n")] = 0;
 	    
-	    // Skip comment lines
 	    if (strstr(data, "//") == data) {
 		continue;
 	    }
 	    
-	    // Skip empty lines
 	    if (strlen(data) == 0) {
 		continue;
 	    }
 	    
-	    // Trim leading whitespace
 	    char *line = data;
 	    while (*line == ' ' || *line == '\t') line++;
 	    
-	    // Check for enable_uclogic setting
 	    if (strncasecmp(line, "enable_uclogic:", 15) == 0) {
 		char* value = line + 15;
-		// Skip spaces after colon
 		while (*value == ' ') value++;
 		if (strncasecmp(value, "true", 4) == 0) {
 		    enable_uclogic = 1;
@@ -493,10 +527,35 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		continue;
 	    }
 	    
-	    // Check for Button definition
+	    if (strncasecmp(line, "leader_button:", 14) == 0) {
+		char* value = line + 14;
+		while (*value == ' ') value++;
+		leader.leader_button = atoi(value);
+		if (debug) printf("Config: leader_button = %d\n", leader.leader_button);
+		continue;
+	    }
+	    
+	    if (strncasecmp(line, "leader_function:", 16) == 0) {
+		char* value = line + 16;
+		while (*value == ' ') value++;
+		leader.leader_function = strdup(value);
+		if (leader.leader_function != NULL) {
+		    trim_trailing_spaces(leader.leader_function);
+		}
+		if (debug) printf("Config: leader_function = '%s'\n", leader.leader_function);
+		continue;
+	    }
+	    
+	    if (strncasecmp(line, "leader_timeout:", 15) == 0) {
+		char* value = line + 15;
+		while (*value == ' ') value++;
+		leader.timeout_ms = atoi(value);
+		if (debug) printf("Config: leader_timeout = %d ms\n", leader.timeout_ms);
+		continue;
+	    }
+	    
 	    if (strncasecmp(line, "button ", 7) == 0) {
 		char* num_str = line + 7;
-		// Skip spaces after "button"
 		while (*num_str == ' ') num_str++;
 		button = atoi(num_str);
 		
@@ -511,7 +570,6 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 			return;
 		    }
 		    events = temp;
-		    // Initialize new entries
 		    for (int j = totalButtons; j <= button; j++) {
 			events[j].function = NULL;
 			events[j].type = 0;
@@ -521,22 +579,17 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		continue;
 	    }
 	    
-	    // Check for type definition
 	    if (strncasecmp(line, "type:", 5) == 0 && button != -1) {
 		char* type_str = line + 5;
-		// Skip spaces after colon
 		while (*type_str == ' ') type_str++;
 		events[button].type = atoi(type_str);
 		continue;
 	    }
 	    
-	    // Check for function definition
 	    if (strncasecmp(line, "function:", 9) == 0) {
 		char* func_str = line + 9;
-		// Skip spaces after colon
 		while (*func_str == ' ') func_str++;
 		
-		// Duplicate the function string
 		char* func_copy = strdup(func_str);
 		if (func_copy == NULL) {
 		    printf("Memory allocation failed!\n");
@@ -548,19 +601,16 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		}
 		
 		if (!wheelType) {
-		    // Button function
 		    if (button >= 0 && button < totalButtons) {
 			if (events[button].function != NULL) {
 			    free(events[button].function);
 			}
 			events[button].function = func_copy;
 		    } else {
-			// Invalid button index
 			free(func_copy);
 			if (debug) printf("Warning: function without valid button definition\n");
 		    }
 		} else if (wheelType == 1){
-		    // Right wheel function (clockwise)
 		    if (rightWheels != 0){
 			wheel* temp = realloc(wheelEvents, (rightWheels+1)*sizeof(*wheelEvents));
 			if (temp == NULL) {
@@ -573,7 +623,6 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 			    return;
 			}
 			wheelEvents = temp;
-			// Initialize the new entry
 			wheelEvents[rightWheels].right = func_copy;
 			wheelEvents[rightWheels].left = NULL;
 		    }else{
@@ -582,7 +631,6 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		    }
 		    rightWheels++;
 		}else{
-		    // Left wheel function (counter-clockwise)
 		    if (leftWheels < rightWheels) {
 			if (wheelEvents[leftWheels].left != NULL) {
 			    free(wheelEvents[leftWheels].left);
@@ -608,13 +656,11 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		continue;
 	    }
 	    
-	    // Check for Wheel definition
 	    if (strncasecmp(line, "wheel", 5) == 0) {
 		wheelType++;
 		continue;
 	    }
 	    
-	    // If we get here, the line is unrecognized
 	    if (debug > 1) {
 		printf("Skipping unrecognized line: %s\n", line);
 	    }
@@ -632,7 +678,7 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		printf("\n=== Button Configuration ===\n");
 		for (int i = 0; i < totalButtons; i++) {
 			if (events[i].function != NULL) {
-				printf("Button %2d: Type: %d | Function: %s\n", i, events[i].type, events[i].function);
+				printf("Button %2d: Type: %d | Function: '%s'\n", i, events[i].type, events[i].function);
 			} else {
 				printf("Button %2d: Type: %d | Function: (not set)\n", i, events[i].type);
 			}
@@ -643,17 +689,19 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 			       wheelEvents[i].right ? wheelEvents[i].right : "(null)",
 			       wheelEvents[i].left ? wheelEvents[i].left : "(null)");
 		}
+		printf("\n=== Leader Configuration ===\n");
+		printf("Leader button: %d\n", leader.leader_button);
+		printf("Leader function: '%s'\n", leader.leader_function ? leader.leader_function : "(null)");
+		printf("Leader timeout: %d ms\n", leader.timeout_ms);
 		printf("\n");
 	}
 	
-	// Check module state and print warnings
+	// Check module state
 	int uclogic_loaded = is_module_loaded("hid_uclogic");
-	int wacom_loaded = is_module_loaded("wacom");
 	
 	if (debug) {
-		printf("Module status: hid_uclogic=%s, wacom=%s\n",
-		       uclogic_loaded ? "loaded" : "not loaded",
-		       wacom_loaded ? "loaded" : "not loaded");
+		printf("Module status: hid_uclogic=%s\n",
+		       uclogic_loaded ? "loaded" : "not loaded");
 		printf("Config: enable_uclogic=%s\n", enable_uclogic ? "true" : "false");
 	}
 	
@@ -665,17 +713,15 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 	
 	free(data);
 	int devI = 0;
-	char indi[] = "|/-\\";
 	int use_hidraw_fallback = 0;
 	
 	while (err == 0 || err == LIBUSB_ERROR_NO_DEVICE){
-		libusb_device **devs; // List of USB devices
-		libusb_device *dev; // Selected USB device
-		struct libusb_config_descriptor *desc; // USB description (For claiming interfaces)
-		libusb_device_handle *handle = NULL; // USB handle
+		libusb_device **devs;
+		libusb_device *dev;
+		struct libusb_config_descriptor *desc;
+		libusb_device_handle *handle = NULL;
 		int hidraw_fd = -1;
 
-		// Try hidraw fallback if enabled and modules are interfering
 		if (!enable_uclogic && uclogic_loaded && use_hidraw_fallback == 0) {
 			hidraw_fd = try_hidraw_access();
 			if (hidraw_fd >= 0) {
@@ -689,7 +735,6 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		err = libusb_get_device_list(ctx, &devs);
 		if (err < 0){
 			printf("Unable to retrieve USB devices. Exiting...\n");
-			// Clean up allocated memory
 			for (int i = 0; i < totalButtons; i++) {
 				if (events[i].function != NULL) {
 					free(events[i].function);
@@ -706,13 +751,12 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 				}
 			}
 			free(wheelEvents);
-			if (btn_state.current_shortcut != NULL) {
-				free(btn_state.current_shortcut);
+			if (leader.leader_function != NULL) {
+				free(leader.leader_function);
 			}
 			return;
 		}
 
-		// Gets a list of devices and looks for ones that have the same vid and pid
 		int d=0, found=0;
 		devI=0;
 		libusb_device *savedDevs[sizeof(devs)];
@@ -738,7 +782,6 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 							if (err == LIBUSB_ERROR_ACCESS){
 								printf("Error: Permission denied\n");
 								libusb_free_device_list(devs, 1);
-								// Clean up allocated memory
 								for (int i = 0; i < totalButtons; i++) {
 									if (events[i].function != NULL) {
 										free(events[i].function);
@@ -755,8 +798,8 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 									}
 								}
 								free(wheelEvents);
-								if (btn_state.current_shortcut != NULL) {
-									free(btn_state.current_shortcut);
+								if (leader.leader_function != NULL) {
+									free(leader.leader_function);
 								}
 								return;
 							}
@@ -765,7 +808,7 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 							printf("\nUsing: %04x:%04x (Bus: %03d Device: %03d)\n", vid, pid, libusb_get_bus_number(dev), libusb_get_device_address(dev));
 						}
 						break;
-					}else{ // If the driver is ran as root, it can safely execute the following
+					}else{
 						err = libusb_open(dev, &handle);
 						if (err < 0){
 							printf("\nUnable to open device. Error: %d\n", err);
@@ -822,7 +865,6 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 						printf("  3. Run driver as root (not recommended)\n");
 					}
 					libusb_free_device_list(devs, 1);
-					// Clean up allocated memory
 					for (int i = 0; i < totalButtons; i++) {
 						if (events[i].function != NULL) {
 							free(events[i].function);
@@ -839,8 +881,8 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 						}
 					}
 					free(wheelEvents);
-					if (btn_state.current_shortcut != NULL) {
-						free(btn_state.current_shortcut);
+					if (leader.leader_function != NULL) {
+						free(leader.leader_function);
 					}
 					return;
 				}
@@ -849,7 +891,6 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 			printf("Error: Found device does not appear to be the keydial\n");
 			printf("Try running without the -a flag\n");
 			libusb_free_device_list(devs, 1);
-			// Clean up allocated memory
 			for (int i = 0; i < totalButtons; i++) {
 				if (events[i].function != NULL) {
 					free(events[i].function);
@@ -857,42 +898,40 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 			}
 			free(events);
 			
-			for (int i = 0; i < totalWheels; i++) {
-				if (wheelEvents[i].right != NULL) {
-					free(wheelEvents[i].right);
-				}
-				if (wheelEvents[i].left != NULL) {
-					free(wheelEvents[i].left);
-				}
-			}
-			free(wheelEvents);
-			if (btn_state.current_shortcut != NULL) {
-				free(btn_state.current_shortcut);
-			}
-			return;
+	for (int i = 0; i < totalWheels; i++) {
+		if (wheelEvents[i].right != NULL) {
+			free(wheelEvents[i].right);
+		}
+		if (wheelEvents[i].left != NULL) {
+			free(wheelEvents[i].left);
+		}
+	}
+	free(wheelEvents);
+	if (leader.leader_function != NULL) {
+		free(leader.leader_function);
+	}
+	return;
 		}
 
 		int interfaces=0;
 		if (handle == NULL && hidraw_fd < 0){
 			printf("\rWaiting for a device %c", indi[c]);
 			fflush(stdout);
-			usleep(250000); // Buffer
+			usleep(250000);
 			c++;
 			if (c == 4){
 				c=0;
 			}
 			err = LIBUSB_ERROR_NO_DEVICE;
-		}else{ // Claims the device and starts the driver
+		}else{
 			if (debug == 0){
 				system("clear");
 			}
 
 			if (hidraw_fd >= 0) {
-				// Using hidraw interface
 				printf("Starting driver via hidraw...\n");
 				printf("Driver is running!\n");
 				
-				// Main loop for hidraw
 				while (1) {
 					unsigned char data[64];
 					ssize_t bytes_read = read(hidraw_fd, data, sizeof(data));
@@ -903,7 +942,6 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 					}
 					
 					if (bytes_read > 0) {
-						// Process hidraw data (you'll need to adapt this based on actual hidraw data format)
 						if (debug == 2 || dry) {
 							printf("HIDRAW DATA: [%d", data[0]);
 							for (int i = 1; i < bytes_read; i++) {
@@ -911,16 +949,12 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 							}
 							printf("]\n");
 						}
-						
-						// TODO: Map hidraw data to keycodes and trigger events
-						// This will depend on the actual hidraw data format
 					}
 					
-					usleep(10000); // Small delay to prevent CPU hogging
+					usleep(10000);
 				}
 				
 				close(hidraw_fd);
-				// Clean up allocated memory before returning
 				for (int i = 0; i < totalButtons; i++) {
 					if (events[i].function != NULL) {
 						free(events[i].function);
@@ -937,28 +971,24 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 					}
 				}
 				free(wheelEvents);
-				if (btn_state.current_shortcut != NULL) {
-					free(btn_state.current_shortcut);
+				if (leader.leader_function != NULL) {
+					free(leader.leader_function);
 				}
 				return;
 			} else {
-				// Using libusb interface
 				interfaces = 0;
 				printf("Starting driver via libusb...\n");
 
-				// Read device and claim interfaces
 				dev = libusb_get_device(handle);
 				libusb_get_config_descriptor(dev, 0, &desc);
 				interfaces = desc->bNumInterfaces;
 				libusb_free_config_descriptor(desc);
 				
-				// Set auto-detach based on enable_uclogic setting
 				if (enable_uclogic) {
 					libusb_set_auto_detach_kernel_driver(handle, 1);
 					if (debug == 1)
 						printf("Using auto-detach (hid_uclogic compatible mode)\n");
 				} else {
-					// Try to detach kernel driver if it's active
 					for (int x = 0; x < interfaces; x++) {
 						if (libusb_kernel_driver_active(handle, x) == 1) {
 							printf("Detaching kernel driver from interface %d...\n", x);
@@ -980,17 +1010,18 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 				}
 
 				printf("Driver is running!\n");
-				printf("Button combinations enabled - hold multiple buttons for shortcuts!\n");
+				printf("Leader key system enabled!\n");
+				printf("Press leader button first, then another button for combinations.\n");
 
 				err = 0;
 				prevEvent.function = "";
 				prevEvent.type = 0;
-				while (err >=0){ // Listen for events
-					unsigned char data[40]; // Stores device input
-					int keycode = 0; // Keycode read from the device
-					err = libusb_interrupt_transfer(handle, 0x81, data, sizeof(data), NULL, 0); // Get data
+				
+				while (err >=0){
+					unsigned char data[40];
+					int keycode = 0;
+					err = libusb_interrupt_transfer(handle, 0x81, data, sizeof(data), NULL, 0);
 
-					// Potential errors
 					if (err == LIBUSB_ERROR_TIMEOUT)
 						printf("\nTIMEDOUT\n");
 					if (err == LIBUSB_ERROR_PIPE)
@@ -1022,80 +1053,30 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 					if (dry)
 						keycode = 0;
 
-					// Compare keycodes to data and trigger events
 					if (debug == 1 && keycode != 0){
 						printf("Keycode: %d\n", keycode);
 					}
 					
-					// Handle wheel events (these don't participate in combinations)
-					if (keycode == 641){ // Wheel clockwise
+					// Handle wheel events
+					if (keycode == 641){
 						if (wheelFunction >= 0 && wheelFunction < totalWheels && 
 							wheelEvents[wheelFunction].right != NULL) {
 							Handler(wheelEvents[wheelFunction].right, -1, debug);
-						} else {
-							if (debug == 1) {
-								printf("Wheel function %d.right is NULL or out of bounds\n", wheelFunction);
-							}
 						}
-					}else if (keycode == 642){ // Counter clockwise
+					}else if (keycode == 642){
 						if (wheelFunction >= 0 && wheelFunction < totalWheels && 
 							wheelEvents[wheelFunction].left != NULL) {
 							Handler(wheelEvents[wheelFunction].left, -1, debug);
-						} else {
-							if (debug == 1) {
-								printf("Wheel function %d.left is NULL or out of bounds\n", wheelFunction);
-							}
-						}
-					}else if (keycode == 0){ // Button released
-						// Clear all pressed buttons when we get a 0 keycode
-						// This happens when all buttons are released
-						if (btn_state.button_count > 0) {
-							clear_button_state(&btn_state);
-							process_button_combination(&btn_state, events, debug);
-						}
-						
-						// Also handle the old single-button logic for compatibility
-						if (prevEvent.type != 0){ // Reset key held
-							Handler(prevEvent.function, prevEvent.type, debug);
-							prevEvent.function = "";
-							prevEvent.type = 0;
 						}
 					}else{
-						// Handle button combinations
-						int button_index = -1;
+						int button_index = find_button_index(keycode);
 						
-						// Find which button was pressed
-						for (int k = 0; k < 19; k++){
-							if (keycodes[k] == keycode){
-								button_index = k;
-								break;
-							}
-						}
-						
-						if (button_index != -1) {
-							// Check if button is already pressed
-							int already_pressed = 0;
-							for (int i = 0; i < btn_state.button_count; i++) {
-								if (btn_state.pressed_buttons[i] == button_index) {
-									already_pressed = 1;
-									break;
-								}
-							}
+						if (button_index != -1){
+							// Process button press
+							process_leader_combination(&leader, events, button_index, debug);
 							
-							if (!already_pressed) {
-								// Add to pressed buttons
-								if (btn_state.button_count < 19) {
-									btn_state.pressed_buttons[btn_state.button_count] = button_index;
-									btn_state.button_count++;
-									
-									// Process the new combination
-									process_button_combination(&btn_state, events, debug);
-								}
-							}
-							
-							// Also run the old logic for single-button type 0 events
-							// This ensures backward compatibility
-							if (events[button_index].function != NULL){
+							// Also handle legacy single-button events for compatibility
+							if (events[button_index].function != NULL) {
 								if (strcmp(events[button_index].function, "NULL") == 0){
 									if (prevEvent.type != 0){
 										Handler(prevEvent.function, prevEvent.type, debug);
@@ -1103,18 +1084,7 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 										prevEvent.function = "";
 									}
 								}
-								else if (events[button_index].type == 0){
-									// Single key press - handled by combination system now
-									// Keep for backward compatibility
-									if (strcmp(events[button_index].function, prevEvent.function)){
-										if (prevEvent.type != 0){
-											Handler(prevEvent.function, prevEvent.type, debug);
-										}
-										prevEvent.function = events[button_index].function;
-										prevEvent.type=1;
-									}
-									Handler(events[button_index].function, 0, debug);
-								}else if (strcmp(events[button_index].function, "swap") == 0){
+								else if (strcmp(events[button_index].function, "swap") == 0){
 									if (wheelFunction != totalWheels-1){
 										wheelFunction++;
 									}else
@@ -1133,9 +1103,6 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 										prevEvent.type=3;
 									}
 									Handler(events[button_index].function, 2, debug);
-								}else{
-									// Type 1: Run program/script
-									system(events[button_index].function);
 								}
 							}
 						}
@@ -1148,15 +1115,18 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 						}
 						printf("]\n");
 						
-						// Debug button state
-						if (btn_state.button_count > 0) {
-							printf("Pressed buttons: ");
-							for (int i = 0; i < btn_state.button_count; i++) {
-								printf("%d ", btn_state.pressed_buttons[i]);
-							}
-							printf("\n");
+						if (leader.leader_active) {
+							struct timeval now;
+							gettimeofday(&now, NULL);
+							long elapsed = time_diff_ms(leader.leader_press_time, now);
+							printf("Leader active: YES (%ld ms elapsed)\n", elapsed);
+						} else {
+							printf("Leader active: NO\n");
 						}
 					}
+					
+					// Small delay to prevent CPU hogging
+					usleep(10000);
 				}
 
 				// Cleanup
@@ -1169,7 +1139,7 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 				printf("Closing device...\n");
 				libusb_close(handle);
 				interfaces=0;
-				sleep(1); // Buffer to wait in case the device was disconnected
+				sleep(1);
 			}
 		}
 		libusb_free_device_list(devs, 1);
@@ -1193,43 +1163,40 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 	}
 	free(wheelEvents);
 	
-	if (btn_state.current_shortcut != NULL) {
-		free(btn_state.current_shortcut);
+	if (leader.leader_function != NULL) {
+		free(leader.leader_function);
 	}
 }
 
 void Handler(char* key, int type, int debug){
-	// Safety checks
 	if (key == NULL) {
 		if (debug == 1) printf("Handler called with NULL key\n");
 		return;
 	}
 	
-	// Check for "NULL" string
 	if (strcmp(key, "NULL") == 0) {
 		return;
 	}
 	
 	char* cmd = NULL;
 	int is_mouse = 0;
-	char mouse_char = '1';  // Default to left mouse button
+	char mouse_char = '1';
 	
-	// Determine the command based on type
 	switch(type) {
-		case -1:  // Wheel function
+		case -1:
 			cmd = "xdotool key ";
 			break;
-		case 0:   // Key down
+		case 0:
 			cmd = "xdotool keydown ";
 			break;
-		case 1:   // Key up
+		case 1:
 			cmd = "xdotool keyup ";
 			break;
-		case 2:   // Mouse down
+		case 2:
 			is_mouse = 1;
 			cmd = "xdotool mousedown ";
 			break;
-		case 3:   // Mouse up
+		case 3:
 			is_mouse = 1;
 			cmd = "xdotool mouseup ";
 			break;
@@ -1242,23 +1209,19 @@ void Handler(char* key, int type, int debug){
 		return;
 	}
 	
-	// For mouse functions, extract the button number
 	if (is_mouse) {
-		// Check if key is long enough and starts with "mouse"
 		if (strlen(key) >= 6 && strncmp(key, "mouse", 5) == 0) {
-			mouse_char = key[5];  // "mouse1" -> '1'
-			// Validate it's a digit 1-5
+			mouse_char = key[5];
 			if (mouse_char < '1' || mouse_char > '5') {
-				mouse_char = '1';  // Default to left button
+				mouse_char = '1';
 			}
 		}
 		
-		char temp[strlen(cmd) + 3];  // cmd + space + digit + null
+		char temp[strlen(cmd) + 3];
 		snprintf(temp, sizeof(temp), "%s %c", cmd, mouse_char);
 		if (debug == 1) printf("Executing: %s\n", temp);
 		system(temp);
 	} else {
-		// For key functions
 		char temp[strlen(cmd) + strlen(key) + 1];
 		snprintf(temp, sizeof(temp), "%s%s", cmd, key);
 		if (debug == 1) printf("Executing: %s\n", temp);
@@ -1267,7 +1230,6 @@ void Handler(char* key, int type, int debug){
 }
 
 char* Substring(const char* in, int start, int end) {
-    // Input validation
     if (in == NULL) {
         char* out = malloc(1);
         if (out) out[0] = '\0';
@@ -1276,35 +1238,28 @@ char* Substring(const char* in, int start, int end) {
     
     int len = strlen(in);
     
-    // Validate bounds
     if (start < 0) start = 0;
     if (start >= len) {
-        // Return empty string for invalid start
         char* out = malloc(1);
         if (out) out[0] = '\0';
         return out;
     }
     
     if (end <= 0) {
-        // Return empty string for invalid length
         char* out = malloc(1);
         if (out) out[0] = '\0';
         return out;
     }
     
-    // Adjust end if it goes beyond string length
     if (start + end > len) {
         end = len - start;
     }
     
-    // Allocate memory (end + 1 for null terminator)
     char* out = malloc(end + 1);
     if (out == NULL) {
-        // Memory allocation failed
         return NULL;
     }
     
-    // Copy substring
     for (int i = 0; i < end; i++) {
         out[i] = in[start + i];
     }
@@ -1335,10 +1290,14 @@ int main(int args, char *in[]){
 			printf("\t-d [-d]\t\tEnable debug outputs (use twice to view data sent by the device)\n");
 			printf("\t-dry \t\tDisplay data sent by the device without sending events\n");
 			printf("\t-h\t\tDisplays this message\n");
-			printf("\nNew in v1.4.6:\n");
-			printf("\t• Button combination support - hold multiple buttons for shortcuts!\n");
-			printf("\t• Example: Hold Button 16 (shift) + Button 0 (b) = shift+b\n");
-			printf("\t• Works with any combination of modifier and regular keys\n");
+			printf("\nNew in v1.4.8 - LEADER KEY SYSTEM (FIXED):\n");
+			printf("\t• Designate one button as the leader (e.g., Button 16)\n");
+			printf("\t• Press leader first, then another button for combinations\n");
+			printf("\t• Example: Button 16 (leader) + Button 0 (b) = shift+b\n");
+			printf("\t• Config options in default.cfg:\n");
+			printf("\t  leader_button: 16          # Which button is the leader\n");
+			printf("\t  leader_function: shift     # What modifier to apply\n");
+			printf("\t  leader_timeout: 1000       # Timeout in milliseconds\n");
 			printf("\nConfiguration:\n");
 			printf("\tAdd 'enable_uclogic: true' to config to work with hid_uclogic loaded\n");
 			printf("\tDefault: enable_uclogic: false (compatible with OpenTabletDriver)\n\n");
@@ -1379,7 +1338,6 @@ int main(int args, char *in[]){
 		return err;
 	}
 	
-	// Print mode info
 	if (enable_uclogic) {
 		printf("Mode: hid_uclogic compatibility enabled\n");
 	} else {
@@ -1389,8 +1347,8 @@ int main(int args, char *in[]){
 		}
 	}
 	
-	printf("\nKD100 Driver v1.4.6 - Button Combinations Enabled\n");
-	printf("Hold multiple buttons to create keyboard shortcuts!\n\n");
+	printf("\nKD100 Driver v1.4.8 - Leader Key System (Fixed)\n");
+	printf("Press leader button first, then another button for combinations!\n\n");
 	
 	GetDevice(ctx, debug, accept, dry);
 	libusb_exit(ctx);
