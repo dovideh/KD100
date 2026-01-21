@@ -1,9 +1,9 @@
 /*
-	V1.4.5
+	V1.4.6
 	https://github.com/mckset/KD100.git
 	KD100 Linux driver for X11 desktops
-	Enhanced version with hid_uclogic compatibility mode
-	Fixed config parsing bug and crash handler
+	Enhanced version with button combination support
+	Allows holding multiple buttons to create keyboard shortcuts
 */
 
 #include <libusb-1.0/libusb.h>
@@ -14,6 +14,7 @@
 #include <pwd.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <ctype.h>
 
 /* ===== CRASH HANDLER - Fixed version with proper address translation ===== */
 #ifdef DEBUG
@@ -143,14 +144,13 @@ void setup_crash_handler(void) {
 }
 #endif
 
-
-
 int keycodes[] = {1, 2, 4, 8, 16, 32, 64, 128, 129, 130, 132, 136, 144, 160, 192, 256, 257, 258, 260, 641, 642};
 char* file = "default.cfg";
 int enable_uclogic = 0; // Default: don't use hid_uclogic (compatible with OpenTabletDriver)
 
 typedef struct event event;
 typedef struct wheel wheel;
+typedef struct button_state button_state;
 
 struct event{
 	int type;
@@ -162,15 +162,154 @@ struct wheel {
 	char* left;
 };
 
+struct button_state {
+    int pressed_buttons[19];  // Track which buttons are currently pressed
+    int button_count;         // How many buttons are pressed
+    char* current_shortcut;   // Current combined shortcut
+    int shortcut_active;      // Whether a shortcut is currently active
+};
+
 void GetDevice(libusb_context*, int, int, int);
 void Handler(char*, int, int);  // Added debug parameter
+void process_button_combination(button_state*, event*, int);
+void clear_button_state(button_state*);
+void send_shortcut(button_state*, int);
 char* Substring(const char*, int, int);
 int is_module_loaded(const char* module_name);
 int try_hidraw_access();
 void print_compatibility_warning();
+int compare_ints(const void*, const void*);
+int is_modifier_key(const char*);
 
 const int vid = 0x256c;
 const int pid = 0x006d;
+
+// Compare function for qsort
+int compare_ints(const void* a, const void* b) {
+    return (*(int*)a - *(int*)b);
+}
+
+// Check if a key is a modifier
+int is_modifier_key(const char* key) {
+    if (key == NULL) return 0;
+    
+    // Common modifiers
+    if (strcmp(key, "ctrl") == 0 || strcmp(key, "control") == 0 ||
+        strcmp(key, "shift") == 0 ||
+        strcmp(key, "alt") == 0 ||
+        strcmp(key, "super") == 0 || strcmp(key, "meta") == 0 ||
+        strcmp(key, "space") == 0) {  // Space can act as a modifier in some contexts
+        return 1;
+    }
+    return 0;
+}
+
+// Clear button state
+void clear_button_state(button_state* state) {
+    state->button_count = 0;
+    if (state->current_shortcut != NULL) {
+        free(state->current_shortcut);
+        state->current_shortcut = NULL;
+    }
+    state->shortcut_active = 0;
+}
+
+// Send shortcut command
+void send_shortcut(button_state* state, int debug) {
+    if (state->current_shortcut != NULL && strlen(state->current_shortcut) > 0) {
+        if (debug == 1) printf("Sending shortcut: %s\n", state->current_shortcut);
+        
+        if (state->shortcut_active) {
+            // Send keyup for previous shortcut
+            char cmd_up[512];
+            snprintf(cmd_up, sizeof(cmd_up), "xdotool keyup %s", state->current_shortcut);
+            system(cmd_up);
+            state->shortcut_active = 0;
+        }
+        
+        // Send keydown for new shortcut
+        char cmd_down[512];
+        snprintf(cmd_down, sizeof(cmd_down), "xdotool keydown %s", state->current_shortcut);
+        system(cmd_down);
+        state->shortcut_active = 1;
+    }
+}
+
+// Process button combination
+void process_button_combination(button_state* state, event* events, int debug) {
+    if (state->button_count == 0) {
+        // No buttons pressed, release any active shortcut
+        if (state->shortcut_active && state->current_shortcut != NULL) {
+            char cmd_up[512];
+            snprintf(cmd_up, sizeof(cmd_up), "xdotool keyup %s", state->current_shortcut);
+            system(cmd_up);
+            state->shortcut_active = 0;
+        }
+        return;
+    }
+    
+    // Sort pressed buttons to ensure consistent ordering
+    qsort(state->pressed_buttons, state->button_count, sizeof(int), compare_ints);
+    
+    // Build shortcut string based on pressed buttons
+    char shortcut[256] = "";
+    int has_non_modifier = 0;
+    
+    for (int i = 0; i < state->button_count; i++) {
+        int btn_index = state->pressed_buttons[i];
+        
+        if (btn_index >= 0 && btn_index < 19 && 
+            events[btn_index].function != NULL && 
+            strcmp(events[btn_index].function, "NULL") != 0) {
+            
+            // Check if this is a modifier key
+            if (is_modifier_key(events[btn_index].function)) {
+                // Add modifier with '+' if not first
+                if (strlen(shortcut) > 0) {
+                    strcat(shortcut, "+");
+                }
+                strcat(shortcut, events[btn_index].function);
+            } else {
+                // Regular key - mark that we have a non-modifier
+                has_non_modifier = 1;
+                if (strlen(shortcut) > 0) {
+                    strcat(shortcut, "+");
+                }
+                strcat(shortcut, events[btn_index].function);
+            }
+        }
+    }
+    
+    // Only send shortcut if we have at least one non-modifier key
+    // (or if we want to allow modifier-only shortcuts)
+    if (strlen(shortcut) > 0 && (has_non_modifier || state->button_count == 1)) {
+        // Check if shortcut changed
+        if (state->current_shortcut == NULL || strcmp(state->current_shortcut, shortcut) != 0) {
+            // Free old shortcut
+            if (state->current_shortcut != NULL) {
+                free(state->current_shortcut);
+            }
+            
+            // Store new shortcut
+            state->current_shortcut = strdup(shortcut);
+            if (state->current_shortcut == NULL) {
+                if (debug == 1) printf("Memory allocation failed for shortcut\n");
+                return;
+            }
+            
+            // Send the new shortcut
+            send_shortcut(state, debug);
+        }
+    } else if (state->shortcut_active) {
+        // No valid shortcut, release any active one
+        if (state->current_shortcut != NULL) {
+            char cmd_up[512];
+            snprintf(cmd_up, sizeof(cmd_up), "xdotool keyup %s", state->current_shortcut);
+            system(cmd_up);
+            state->shortcut_active = 0;
+        }
+    }
+}
 
 // Check if a kernel module is loaded
 int is_module_loaded(const char* module_name) {
@@ -239,6 +378,12 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 	wheel* wheelEvents = malloc(1*sizeof(wheel)); // Stores wheel functions
 	event prevEvent;
 	uid_t uid=getuid(); // Used to check if the driver was ran as root
+	
+	// Button state tracking for combinations
+	button_state btn_state = {0};
+	btn_state.current_shortcut = NULL;
+	btn_state.shortcut_active = 0;
+	btn_state.button_count = 0;
 
 	// Not important
 	int c=0; // Index of the loading character to display when waiting for a device
@@ -248,7 +393,8 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 	if (debug > 0){
 		if (debug > 2)
 			debug=2;
-		printf("Version 1.4.5\nDebug level: %d\n", debug);
+		printf("Version 1.4.6 - Button Combination Support\n");
+		printf("Debug level: %d\n", debug);
 	}		
 
 	// Load config file
@@ -483,14 +629,15 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		totalWheels = leftWheels;
 
 	if (debug > 0){
+		printf("\n=== Button Configuration ===\n");
 		for (int i = 0; i < totalButtons; i++) {
 			if (events[i].function != NULL) {
-				printf("Button: %d | Type: %d | Function: %s\n", i, events[i].type, events[i].function);
+				printf("Button %2d: Type: %d | Function: %s\n", i, events[i].type, events[i].function);
 			} else {
-				printf("Button: %d | Type: %d | Function: (not set)\n", i, events[i].type);
+				printf("Button %2d: Type: %d | Function: (not set)\n", i, events[i].type);
 			}
 		}
-		printf("\n");
+		printf("\n=== Wheel Configuration ===\n");
 		for (int i = 0; i < totalWheels; i++) {
 			printf("Wheel %d: Right: %s | Left: %s\n", i, 
 			       wheelEvents[i].right ? wheelEvents[i].right : "(null)",
@@ -559,6 +706,9 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 				}
 			}
 			free(wheelEvents);
+			if (btn_state.current_shortcut != NULL) {
+				free(btn_state.current_shortcut);
+			}
 			return;
 		}
 
@@ -605,6 +755,9 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 									}
 								}
 								free(wheelEvents);
+								if (btn_state.current_shortcut != NULL) {
+									free(btn_state.current_shortcut);
+								}
 								return;
 							}
 						}
@@ -686,6 +839,9 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 						}
 					}
 					free(wheelEvents);
+					if (btn_state.current_shortcut != NULL) {
+						free(btn_state.current_shortcut);
+					}
 					return;
 				}
 			}
@@ -710,6 +866,9 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 				}
 			}
 			free(wheelEvents);
+			if (btn_state.current_shortcut != NULL) {
+				free(btn_state.current_shortcut);
+			}
 			return;
 		}
 
@@ -778,6 +937,9 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 					}
 				}
 				free(wheelEvents);
+				if (btn_state.current_shortcut != NULL) {
+					free(btn_state.current_shortcut);
+				}
 				return;
 			} else {
 				// Using libusb interface
@@ -818,6 +980,7 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 				}
 
 				printf("Driver is running!\n");
+				printf("Button combinations enabled - hold multiple buttons for shortcuts!\n");
 
 				err = 0;
 				prevEvent.function = "";
@@ -863,11 +1026,8 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 					if (debug == 1 && keycode != 0){
 						printf("Keycode: %d\n", keycode);
 					}
-					if (keycode == 0 && prevEvent.type != 0){ // Reset key held
-						Handler(prevEvent.function, prevEvent.type, debug);
-						prevEvent.function = "";
-						prevEvent.type = 0;
-					}
+					
+					// Handle wheel events (these don't participate in combinations)
 					if (keycode == 641){ // Wheel clockwise
 						if (wheelFunction >= 0 && wheelFunction < totalWheels && 
 							wheelEvents[wheelFunction].right != NULL) {
@@ -886,50 +1046,96 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 								printf("Wheel function %d.left is NULL or out of bounds\n", wheelFunction);
 							}
 						}
+					}else if (keycode == 0){ // Button released
+						// Clear all pressed buttons when we get a 0 keycode
+						// This happens when all buttons are released
+						if (btn_state.button_count > 0) {
+							clear_button_state(&btn_state);
+							process_button_combination(&btn_state, events, debug);
+						}
+						
+						// Also handle the old single-button logic for compatibility
+						if (prevEvent.type != 0){ // Reset key held
+							Handler(prevEvent.function, prevEvent.type, debug);
+							prevEvent.function = "";
+							prevEvent.type = 0;
+						}
 					}else{
+						// Handle button combinations
+						int button_index = -1;
+						
+						// Find which button was pressed
 						for (int k = 0; k < 19; k++){
 							if (keycodes[k] == keycode){
-								if (events[k].function != NULL){
-									if (strcmp(events[k].function, "NULL") == 0){
+								button_index = k;
+								break;
+							}
+						}
+						
+						if (button_index != -1) {
+							// Check if button is already pressed
+							int already_pressed = 0;
+							for (int i = 0; i < btn_state.button_count; i++) {
+								if (btn_state.pressed_buttons[i] == button_index) {
+									already_pressed = 1;
+									break;
+								}
+							}
+							
+							if (!already_pressed) {
+								// Add to pressed buttons
+								if (btn_state.button_count < 19) {
+									btn_state.pressed_buttons[btn_state.button_count] = button_index;
+									btn_state.button_count++;
+									
+									// Process the new combination
+									process_button_combination(&btn_state, events, debug);
+								}
+							}
+							
+							// Also run the old logic for single-button type 0 events
+							// This ensures backward compatibility
+							if (events[button_index].function != NULL){
+								if (strcmp(events[button_index].function, "NULL") == 0){
+									if (prevEvent.type != 0){
+										Handler(prevEvent.function, prevEvent.type, debug);
+										prevEvent.type = 0;
+										prevEvent.function = "";
+									}
+								}
+								else if (events[button_index].type == 0){
+									// Single key press - handled by combination system now
+									// Keep for backward compatibility
+									if (strcmp(events[button_index].function, prevEvent.function)){
 										if (prevEvent.type != 0){
 											Handler(prevEvent.function, prevEvent.type, debug);
-											prevEvent.type = 0;
-											prevEvent.function = "";
 										}
-										break;
+										prevEvent.function = events[button_index].function;
+										prevEvent.type=1;
 									}
-									if (events[k].type == 0){
-										if (strcmp(events[k].function, prevEvent.function)){
-											if (prevEvent.type != 0){
-												Handler(prevEvent.function, prevEvent.type, debug);
-											}
-											prevEvent.function = events[k].function;
-											prevEvent.type=1;
-										}
-										Handler(events[k].function, 0, debug);
-									}else if (strcmp(events[k].function, "swap") == 0){
-										if (wheelFunction != totalWheels-1){
-											wheelFunction++;
-										}else
-											wheelFunction=0;
-										if (debug == 1){
-											printf("Function: %s | %s\n", 
-											       wheelEvents[wheelFunction].left ? wheelEvents[wheelFunction].left : "(null)",
-											       wheelEvents[wheelFunction].right ? wheelEvents[wheelFunction].right : "(null)");
-										}
-									}else if (strcmp(events[k].function, "mouse1") == 0 || strcmp(events[k].function, "mouse2") == 0 || strcmp(events[k].function, "mouse3") == 0 || strcmp(events[k].function, "mouse4") == 0 || strcmp(events[k].function, "mouse5") == 0){
-										if (strcmp(events[k].function, prevEvent.function)){
-											if (prevEvent.type != 0){
-												Handler(prevEvent.function, prevEvent.type, debug);
-											}
-											prevEvent.function = events[k].function;
-											prevEvent.type=3;
-										}
-										Handler(events[k].function, 2, debug);
-									}else{
-										system(events[k].function);
+									Handler(events[button_index].function, 0, debug);
+								}else if (strcmp(events[button_index].function, "swap") == 0){
+									if (wheelFunction != totalWheels-1){
+										wheelFunction++;
+									}else
+										wheelFunction=0;
+									if (debug == 1){
+										printf("Function: %s | %s\n", 
+											   wheelEvents[wheelFunction].left ? wheelEvents[wheelFunction].left : "(null)",
+											   wheelEvents[wheelFunction].right ? wheelEvents[wheelFunction].right : "(null)");
 									}
-									break;
+								}else if (strcmp(events[button_index].function, "mouse1") == 0 || strcmp(events[button_index].function, "mouse2") == 0 || strcmp(events[button_index].function, "mouse3") == 0 || strcmp(events[button_index].function, "mouse4") == 0 || strcmp(events[button_index].function, "mouse5") == 0){
+									if (strcmp(events[button_index].function, prevEvent.function)){
+										if (prevEvent.type != 0){
+											Handler(prevEvent.function, prevEvent.type, debug);
+										}
+										prevEvent.function = events[button_index].function;
+										prevEvent.type=3;
+									}
+									Handler(events[button_index].function, 2, debug);
+								}else{
+									// Type 1: Run program/script
+									system(events[button_index].function);
 								}
 							}
 						}
@@ -941,6 +1147,15 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 							printf(", %d", data[i]);
 						}
 						printf("]\n");
+						
+						// Debug button state
+						if (btn_state.button_count > 0) {
+							printf("Pressed buttons: ");
+							for (int i = 0; i < btn_state.button_count; i++) {
+								printf("%d ", btn_state.pressed_buttons[i]);
+							}
+							printf("\n");
+						}
 					}
 				}
 
@@ -977,6 +1192,10 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		}
 	}
 	free(wheelEvents);
+	
+	if (btn_state.current_shortcut != NULL) {
+		free(btn_state.current_shortcut);
+	}
 }
 
 void Handler(char* key, int type, int debug){
@@ -1116,6 +1335,10 @@ int main(int args, char *in[]){
 			printf("\t-d [-d]\t\tEnable debug outputs (use twice to view data sent by the device)\n");
 			printf("\t-dry \t\tDisplay data sent by the device without sending events\n");
 			printf("\t-h\t\tDisplays this message\n");
+			printf("\nNew in v1.4.6:\n");
+			printf("\t• Button combination support - hold multiple buttons for shortcuts!\n");
+			printf("\t• Example: Hold Button 16 (shift) + Button 0 (b) = shift+b\n");
+			printf("\t• Works with any combination of modifier and regular keys\n");
 			printf("\nConfiguration:\n");
 			printf("\tAdd 'enable_uclogic: true' to config to work with hid_uclogic loaded\n");
 			printf("\tDefault: enable_uclogic: false (compatible with OpenTabletDriver)\n\n");
@@ -1165,6 +1388,9 @@ int main(int args, char *in[]){
 			print_compatibility_warning();
 		}
 	}
+	
+	printf("\nKD100 Driver v1.4.6 - Button Combinations Enabled\n");
+	printf("Hold multiple buttons to create keyboard shortcuts!\n\n");
 	
 	GetDevice(ctx, debug, accept, dry);
 	libusb_exit(ctx);
