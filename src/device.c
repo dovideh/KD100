@@ -337,15 +337,22 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                                 }
                                 wheel_position_in_set = 0;  // Start at first function in new set
                             } else if (final_click_count >= 3) {
-                                // Triple-click: toggle to/from Set 2
-                                if (wheel_current_set == 2) {
-                                    // From Set 2, go back to Set 0
-                                    wheel_current_set = 0;
+                                // Triple-click: toggle to/from Set 2 (only if Set 2 exists - need at least 5 functions)
+                                if (config->totalWheels >= 5) {
+                                    if (wheel_current_set == 2) {
+                                        // From Set 2, go back to Set 0
+                                        wheel_current_set = 0;
+                                    } else {
+                                        // From Set 0 or 1, go to Set 2
+                                        wheel_current_set = 2;
+                                    }
+                                    wheel_position_in_set = 0;  // Start at first function in new set
                                 } else {
-                                    // From Set 0 or 1, go to Set 2
-                                    wheel_current_set = 2;
+                                    if (debug == 1) {
+                                        printf("Triple-click ignored: Set 3 requires at least 5 wheel functions (have %d)\n",
+                                               config->totalWheels);
+                                    }
                                 }
-                                wheel_position_in_set = 0;  // Start at first function in new set
                             }
 
                             // Calculate actual wheel function index
