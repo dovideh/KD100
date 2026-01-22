@@ -31,7 +31,7 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
     if (debug > 0) {
         if (debug > 2)
             debug = 2;
-        printf("Version 1.5.0 - Modular Architecture\n");
+        printf("Version 1.5.1 - Wheel Toggle Modes\n");
         printf("Debug level: %d\n", debug);
     }
 
@@ -265,9 +265,14 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                 }
 
                 printf("Driver is running!\n");
-                printf("Enhanced Leader Key System v1.5.0\n");
+                printf("Enhanced Leader Key System v1.5.1\n");
                 printf("Mode: %s | Timeout: %d ms\n",
                        leader_mode_to_string(config->leader.mode), config->leader.timeout_ms);
+                printf("Wheel Mode: %s", config->wheel_mode == WHEEL_MODE_SEQUENTIAL ? "sequential" : "sets");
+                if (config->wheel_mode == WHEEL_MODE_SETS) {
+                    printf(" | Click Timeout: %d ms", config->wheel_click_timeout_ms);
+                }
+                printf("\n");
                 printf("Press leader button first, then eligible buttons for combinations.\n");
 
                 err = 0;

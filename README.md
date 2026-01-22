@@ -1,11 +1,14 @@
 # Huion KD100 Linux Driver
 A simple driver for the Huion KD100 mini Keydial written in C to give the device some usability while waiting for Huion to fix their Linux drivers. Each button can be configured to either act as a key/multiple keys or to execute a program/command.
 
-**Version 1.5.0** introduces a complete modular architecture refactoring for improved maintainability, while preserving all features from v1.4.9.
+**Version 1.5.1** adds configurable wheel toggle modes with multi-click detection for advanced workflow organization.
 
 > **NOTICE:** When updating from **v1.31** or below, make sure you updated your config file to follow the new format shown in the default config file.
 
 ## Features
+- **Configurable Wheel Toggle Modes (v1.5.1)**: Choose between sequential or set-based navigation
+- **Multi-Click Detection (v1.5.1)**: Single, double, and triple-click support for wheel button
+- **Set-Based Navigation (v1.5.1)**: Organize up to 6 wheel functions into 3 sets of 2
 - **Modular Architecture (v1.5.0)**: Clean separation into 7 focused modules for easy maintenance
 - **Enhanced Leader Key System**: Three configurable modes (one_shot, sticky, toggle)
 - **Per-button Leader Eligibility**: Control which buttons can be modified by leader
@@ -148,6 +151,102 @@ function: swap
 leader_eligible: false    # Typically not eligible
 ```
 
+## Wheel Toggle Modes
+
+### Overview
+Version 1.5.1 introduces configurable wheel toggle modes, allowing you to choose how button 18 cycles through wheel functions.
+
+### Sequential Mode (Default)
+Classic behavior where single-click cycles through all wheel functions sequentially.
+
+```bash
+wheel_mode: sequential
+
+# Example with 5 functions:
+# Click → Function 0 → Click → Function 1 → Click → Function 2 → ... → Click → Function 0
+```
+
+**Benefits:**
+- Simple and straightforward
+- No limit on number of functions
+- No click detection delay
+- Backward compatible with existing configs
+
+### Sets Mode
+Advanced mode using multi-click detection to organize wheel functions into sets.
+
+```bash
+wheel_mode: sets
+wheel_click_timeout: 300  # Time window for multi-click detection (20-990ms)
+```
+
+**Click Behavior:**
+- **Single-click**: Toggle between the two functions in the current set
+- **Double-click**: Switch between Set 1 ↔ Set 2
+- **Triple-click**: Toggle to/from Set 3
+
+**Set Organization:**
+- **Set 1**: Wheel functions 0-1 (primary tools)
+- **Set 2**: Wheel functions 2-3 (secondary tools)
+- **Set 3**: Wheel functions 4-5 (occasional tools)
+
+**Set Navigation:**
+```
+Set 1 → double-click → Set 2
+Set 1 → triple-click → Set 3
+Set 2 → double-click → Set 1
+Set 3 → triple-click → Set 1
+Set 3 → double-click → Set 1
+```
+
+**Example Configuration:**
+```bash
+wheel_mode: sets
+wheel_click_timeout: 300
+
+# Clockwise wheel functions
+Wheel
+function: bracketright        # Set 1, function 0 - Brush size increase
+function: o                   # Set 1, function 1 - Opacity increase
+function: shift+bracketright  # Set 2, function 2 - Flow increase
+function: ctrl+bracketright   # Set 2, function 3 - Rotation clockwise
+function: alt+bracketright    # Set 3, function 4 - Scatter increase
+function: super+bracketright  # Set 3, function 5 - Spacing increase
+
+# Counter-clockwise wheel functions
+Wheel
+function: bracketleft         # Set 1, function 0 - Brush size decrease
+function: i                   # Set 1, function 1 - Opacity decrease
+function: shift+bracketleft   # Set 2, function 2 - Flow decrease
+function: ctrl+bracketleft    # Set 2, function 3 - Rotation counter-clockwise
+function: alt+bracketleft     # Set 3, function 4 - Scatter decrease
+function: super+bracketleft   # Set 3, function 5 - Spacing decrease
+```
+
+**Workflow Example:**
+1. Start in Set 1 (brush size ↔ opacity)
+2. Single-click to toggle between brush size and opacity
+3. Double-click to jump to Set 2 (flow ↔ rotation)
+4. Triple-click to access Set 3 (scatter ↔ spacing)
+5. Double-click from Set 3 to return to Set 1
+
+**Benefits:**
+- Quick access to frequently-used functions (Set 1)
+- Organized workflow by grouping related tools
+- No need to cycle through unused functions
+- Maximum 6 wheel functions (3 sets × 2 functions)
+
+### Configuration Options
+
+```bash
+# Wheel mode selection
+wheel_mode: sequential        # Classic cycling (default)
+wheel_mode: sets              # Set-based navigation
+
+# Multi-click timeout (sets mode only)
+wheel_click_timeout: 300      # Milliseconds (range: 20-990)
+```
+
 ## Configuring
 Edit or copy **default.cfg** to add your own keys/commands and use the `-c` flag to specify the location of the config file. New config files do not need to end in ".cfg".
 
@@ -179,7 +278,13 @@ Edit or copy **default.cfg** to add your own keys/commands and use the `-c` flag
 
 # Special functions:
 # "swap" - Changes wheel button function (type: 1, function: swap)
+#          Behavior depends on wheel_mode setting (sequential or sets)
 # "leader" - Marks button as leader key (type: 0, function: leader)
+
+# Wheel toggle configuration (v1.5.1):
+# wheel_mode: sequential       # Classic cycling through all functions (default)
+# wheel_mode: sets             # Set-based navigation with multi-click
+# wheel_click_timeout: 300     # Multi-click detection timeout in ms (20-990)
 ```
 
 ## hid_uclogic Compatibility
@@ -235,7 +340,19 @@ If you encounter permission errors or device conflicts:
 
 ## Version History
 
-### v1.5.0 (Current) - Modular Architecture
+### v1.5.1 (Current) - Wheel Toggle Modes
+- **Configurable Wheel Modes**: Choose between sequential or set-based navigation
+- **Multi-Click Detection**: Single, double, and triple-click support for button 18
+- **Set-Based Navigation**: Organize up to 6 wheel functions into 3 sets of 2
+- **Configurable Timeout**: Adjustable multi-click detection window (20-990ms)
+- **Backward Compatible**: Defaults to sequential mode (classic behavior)
+- **Enhanced Workflow**: Group related functions for faster access
+- **Configuration Options**:
+  - `wheel_mode: sequential` - Classic cycling through all functions
+  - `wheel_mode: sets` - Set-based navigation with multi-click
+  - `wheel_click_timeout: 300` - Multi-click detection timeout in milliseconds
+
+### v1.5.0 - Modular Architecture
 - **Complete Refactoring**: Transformed from monolithic 1,520-line file to 7 focused modules
 - **Improved Maintainability**: Clean separation of concerns across modules
 - **Better Code Organization**: Each module has a single, clear responsibility
