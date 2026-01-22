@@ -356,9 +356,13 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                             if (debug == 1) {
                                 printf("Set: %d | Position: %d | Wheel Function: %d\n",
                                        wheel_current_set, wheel_position_in_set, wheelFunction);
-                                printf("Function: %s | %s\n",
-                                       config->wheelEvents[wheelFunction].left ? config->wheelEvents[wheelFunction].left : "(null)",
-                                       config->wheelEvents[wheelFunction].right ? config->wheelEvents[wheelFunction].right : "(null)");
+                                if (wheelFunction >= 0 && wheelFunction < config->totalWheels) {
+                                    printf("Function: %s | %s\n",
+                                           config->wheelEvents[wheelFunction].left ? config->wheelEvents[wheelFunction].left : "(null)",
+                                           config->wheelEvents[wheelFunction].right ? config->wheelEvents[wheelFunction].right : "(null)");
+                                } else {
+                                    printf("Function: (not defined - incomplete set)\n");
+                                }
                             }
                         }
                     }
