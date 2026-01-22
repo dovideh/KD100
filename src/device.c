@@ -332,8 +332,8 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                                 } else if (wheel_current_set == 1) {
                                     wheel_current_set = 0;
                                 } else {
-                                    // From Set 2, go to Set 0
-                                    wheel_current_set = 0;
+                                    // From Set 2, go to Set 1 (not Set 0)
+                                    wheel_current_set = 1;
                                 }
                                 wheel_position_in_set = 0;  // Start at first function in new set
                             } else if (final_click_count >= 3) {
