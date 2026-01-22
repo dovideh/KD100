@@ -193,6 +193,9 @@ void trim_trailing_spaces(char* str);
 leader_mode_t parse_leader_mode(const char* mode_str);
 const char* leader_mode_to_string(leader_mode_t mode);
 
+const int vid = 0x256c;
+const int pid = 0x006d;
+
 // Get current time in milliseconds
 long get_time_ms() {
     struct timeval tv;
