@@ -17,6 +17,7 @@ typedef struct {
     int totalWheels;
     leader_state leader;
     int enable_uclogic;
+    int wheel_click_timeout_ms;  // Multi-click detection timeout (20-990ms)
 } config_t;
 
 // Configuration functions

@@ -31,6 +31,7 @@ config_t* config_create(void) {
     config->totalButtons = 0;
     config->totalWheels = 0;
     config->enable_uclogic = 0;
+    config->wheel_click_timeout_ms = 300;  // 300ms default timeout
 
     // Initialize leader state
     config->leader.leader_button = -1;
@@ -136,6 +137,19 @@ int config_load(config_t* config, const char* filename, int debug) {
                 config->enable_uclogic = 0;
                 if (debug) printf("Config: enable_uclogic = false\n");
             }
+            continue;
+        }
+
+        // Parse wheel_click_timeout
+        if (strncasecmp(line, "wheel_click_timeout:", 20) == 0) {
+            char* value = line + 20;
+            while (*value == ' ') value++;
+            int timeout = atoi(value);
+            // Enforce hard limits: 20-990ms
+            if (timeout < 20) timeout = 20;
+            if (timeout > 990) timeout = 990;
+            config->wheel_click_timeout_ms = timeout;
+            if (debug) printf("Config: wheel_click_timeout = %d ms\n", config->wheel_click_timeout_ms);
             continue;
         }
 
@@ -348,5 +362,8 @@ void config_print(const config_t* config, int debug) {
     printf("Leader function: '%s'\n", config->leader.leader_function ? config->leader.leader_function : "(null)");
     printf("Leader timeout: %d ms\n", config->leader.timeout_ms);
     printf("Leader mode: %s\n", leader_mode_to_string(config->leader.mode));
+
+    printf("\n=== Wheel Click Configuration ===\n");
+    printf("Multi-click timeout: %d ms\n", config->wheel_click_timeout_ms);
     printf("\n");
 }
