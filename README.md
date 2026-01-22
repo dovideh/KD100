@@ -195,8 +195,9 @@ wheel_click_timeout: 300  # Time window for multi-click detection (20-990ms)
 Set 1 → double-click → Set 2
 Set 1 → triple-click → Set 3
 Set 2 → double-click → Set 1
+Set 2 → triple-click → Set 3
+Set 3 → double-click → Set 2
 Set 3 → triple-click → Set 1
-Set 3 → double-click → Set 1
 ```
 
 **Example Configuration:**
@@ -228,7 +229,7 @@ function: super+bracketleft   # Set 3, function 5 - Spacing decrease
 2. Single-click to toggle between brush size and opacity
 3. Double-click to jump to Set 2 (flow ↔ rotation)
 4. Triple-click to access Set 3 (scatter ↔ spacing)
-5. Double-click from Set 3 to return to Set 1
+5. Double-click from Set 3 to return to Set 2, or triple-click to return to Set 1
 
 **Benefits:**
 - Quick access to frequently-used functions (Set 1)
