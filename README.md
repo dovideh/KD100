@@ -1,4 +1,3 @@
-```markdown
 # Huion KD100 Linux Driver
 A simple driver for the Huion KD100 mini Keydial written in C to give the device some usability while waiting for Huion to fix their Linux drivers. Each button can be configured to either act as a key/multiple keys or to execute a program/command.
 
@@ -282,16 +281,3 @@ This project is licensed under the GPL-3.0 License - see the LICENSE file for de
 - Original driver by mckset
 - Enhanced features and debugging by community contributors
 - OpenTabletDriver compatibility improvements
-```
-
-I've updated the README to reflect all the new features in version 1.4.9, including:
-
-1. **Enhanced Leader Key System** with three modes (one_shot, sticky, toggle)
-2. **Per-button leader eligibility** configuration
-3. **Fixed toggle mode behavior** (now properly persists)
-4. **Fixed config parsing issue** (button 18 no longer inherits wrong eligibility)
-5. **hid_uclogic compatibility** improvements
-6. **Advanced debugging capabilities**
-7. **Multiple build targets**
-
-The README now provides clear examples of the new leader modes, explains the eligibility system, and includes troubleshooting tips for common issues. It also maintains backward compatibility information for users upgrading from older versions.
