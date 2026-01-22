@@ -1,23 +1,41 @@
 # Huion KD100 Linux Driver
 A simple driver for the Huion KD100 mini Keydial written in C to give the device some usability while waiting for Huion to fix their Linux drivers. Each button can be configured to either act as a key/multiple keys or to execute a program/command.
 
-**Version 1.4.9** introduces an enhanced leader key system with configurable modes (one_shot, sticky, toggle) and per-button eligibility controls.
+**Version 1.5.0** introduces a complete modular architecture refactoring for improved maintainability, while preserving all features from v1.4.9.
 
 > **NOTICE:** When updating from **v1.31** or below, make sure you updated your config file to follow the new format shown in the default config file.
 
 ## Features
+- **Modular Architecture (v1.5.0)**: Clean separation into 7 focused modules for easy maintenance
 - **Enhanced Leader Key System**: Three configurable modes (one_shot, sticky, toggle)
 - **Per-button Leader Eligibility**: Control which buttons can be modified by leader
 - **hid_uclogic Compatibility**: Work with or without the hid_uclogic kernel module
 - **Advanced Debugging**: Stack traces and line numbers on crashes (debug builds)
 - **Multiple Build Targets**: Debug, release, sanitizer builds
-- **Improved Memory Management**: Proper cleanup and error handling
-- **Better Config Parsing**: More robust config file handling
+- **Clean Compilation**: Zero warnings with strict compiler flags
+- **Better Code Organization**: Easy to extend and maintain
+
+## Architecture (v1.5.0)
+
+The codebase is organized into focused modules:
+
+```
+src/
+├── main.c       - Application entry point and orchestration
+├── config.c/h   - Configuration file parsing and management
+├── device.c/h   - USB device discovery and event loop
+├── leader.c/h   - Leader key system implementation
+├── handler.c/h  - Event handling and key execution
+├── utils.c/h    - Utility functions (time, string, parsing)
+└── compat.c/h   - Hardware compatibility layer
+```
+
+Each module has a single, clear responsibility, making the code easier to understand, test, and extend.
 
 ## Pre-Installation
 **Arch Linux/Manjaro:**
 ```bash
-sudo pacman -S libusb-1.0 xdotool
+sudo pacman -S libusb xdotool
 ```
 
 **Ubuntu/Debian/Pop OS:**
@@ -35,17 +53,17 @@ cd KD100
 make
 ```
 
-> Running `make` as root will install the driver as a command and create a folder in `~/.config` to store config files.
+> Running `sudo make install` will install the driver system-wide and create a folder in `~/.config` to store config files.
 
 ### Build Options
 ```bash
-# Standard build
+# Standard build (optimized, no debug symbols)
 make
 
 # Debug build (with crash handler and symbols)
 make debug
 
-# Release build (optimized)
+# Release build (optimized, stripped)
 make release
 
 # Install system-wide
@@ -57,6 +75,9 @@ make valgrind # Memory checking
 make strace   # System call tracing
 make asan     # AddressSanitizer build
 make ubsan    # UndefinedBehaviorSanitizer build
+
+# Clean build artifacts
+make clean
 ```
 
 ## Usage
@@ -69,11 +90,11 @@ sudo ./KD100 [options]
 - `-c [path]` - Specify a config file to use after the flag (`./default.cfg` or `~/.config/KD100/default.cfg` is used normally)
 - `-d` - Enable debug output (can be used twice to output the full packet of data received from the device)
 - `-dry` - Display data sent from the keydial and ignore events
-- `-h` - Displays this help message
+- `-h` - Displays help message
 - `--uclogic` - Force hid_uclogic compatibility mode
 - `--no-uclogic` - Disable hid_uclogic compatibility (OpenTabletDriver mode)
 
-## Enhanced Leader Key System (v1.4.9)
+## Enhanced Leader Key System
 
 ### Leader Modes
 The enhanced leader key system supports three modes:
@@ -195,12 +216,12 @@ If you encounter permission errors or device conflicts:
    ```
 
 ## Caveats
-- This only works on X11 based desktops (because it relies on xdotool) but can be patched for Wayland desktops by altering the "handler" function.
+- This only works on X11 based desktops (because it relies on xdotool) but can be patched for Wayland desktops by altering the handler module in `src/handler.c`.
 - You do not need to run this with sudo if you set a udev rule for the device. Create/edit a rule file in `/etc/udev/rules.d/` and add the following, then save and reboot or reload your udev rules:
   ```bash
   SUBSYSTEM=="usb",ATTRS{idVendor}=="256c",ATTRS{idProduct}=="006d",MODE="0666",GROUP="plugdev"
   ```
-- Technically speaking, this can support other devices, especially if they send the same type of byte information. Otherwise, the code should be easy enough to edit and add support for other USB devices. If you want to see the information sent by different devices, change the vid and pid in the program and run it with two debug flags.
+- Technically speaking, this can support other devices, especially if they send the same type of byte information. Otherwise, the code should be easy enough to edit and add support for other USB devices. If you want to see the information sent by different devices, change the device constants in `src/device.h` and run it with two debug flags.
 
 ## Tested Distros
 - Arch Linux
@@ -211,12 +232,26 @@ If you encounter permission errors or device conflicts:
 ## Known Issues
 - Setting shortcuts like "ctrl+c" will close the driver if it ran from a terminal and it's active.
 - The driver cannot trigger keyboard shortcuts from combining multiple buttons on the device (due to how the data is packaged).
-- **Fixed in v1.4.9:** Toggle mode now properly persists across multiple key presses.
-- **Fixed in v1.4.9:** Config parsing issue where button 18 was inheriting the last button's `leader_eligible` value.
 
 ## Version History
 
-### v1.4.9 (Current)
+### v1.5.0 (Current) - Modular Architecture
+- **Complete Refactoring**: Transformed from monolithic 1,520-line file to 7 focused modules
+- **Improved Maintainability**: Clean separation of concerns across modules
+- **Better Code Organization**: Each module has a single, clear responsibility
+- **Enhanced Testability**: Modules can be tested independently
+- **Clean Compilation**: Zero warnings with `-Wall -Wextra -Wpedantic` flags
+- **Preserved Features**: 100% feature parity with v1.4.9
+- **Module Structure**:
+  - `main.c` (269 lines) - Entry point and orchestration
+  - `config.c/h` (352 lines) - Configuration parsing
+  - `device.c/h` (402 lines) - USB device handling
+  - `leader.c/h` (198 lines) - Leader key system
+  - `handler.c/h` (65 lines) - Event handling
+  - `utils.c/h` (122 lines) - Utility functions
+  - `compat.c/h` (66 lines) - Compatibility layer
+
+### v1.4.9
 - **Enhanced Leader Key System**: Three configurable modes (one_shot, sticky, toggle)
 - **Per-button Leader Eligibility**: Control which buttons can be modified by leader
 - **Fixed Toggle Mode**: Now properly persists until explicitly disabled
@@ -270,9 +305,27 @@ sudo ./KD100-debug -d
 
 ## Contributing
 Feel free to submit issues and pull requests. When contributing code:
+- Follow the modular architecture in `src/`
 - Use the debug build for testing: `make debug`
 - Run memory checks: `make valgrind`
 - Test with AddressSanitizer: `make asan`
+- Ensure clean compilation: no warnings with `-Wall -Wextra -Wpedantic`
+
+## Development
+
+### Code Structure
+The modular design makes it easy to add new features:
+- Add device support → Modify `src/device.c`
+- Change key handling → Modify `src/handler.c`
+- Add config options → Modify `src/config.c`
+- Extend leader modes → Modify `src/leader.c`
+
+### Adding New Features
+1. Identify the appropriate module for your feature
+2. Add necessary data structures to the module's `.h` file
+3. Implement functionality in the module's `.c` file
+4. Test with `make debug` and `make asan`
+5. Submit a pull request
 
 ## License
 This project is licensed under the GPL-3.0 License - see the LICENSE file for details.
@@ -281,3 +334,4 @@ This project is licensed under the GPL-3.0 License - see the LICENSE file for de
 - Original driver by mckset
 - Enhanced features and debugging by community contributors
 - OpenTabletDriver compatibility improvements
+- Modular architecture refactoring (v1.5.0)
