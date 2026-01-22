@@ -20,12 +20,18 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
     prevEvent.function = "";
     prevEvent.type = 0;
 
+    // Multi-click detection state for button 18
+    struct timeval last_button18_time = {0, 0};
+    int button18_click_count = 0;
+    int wheel_current_set = 0;      // Current set: 0 (functions 0-1), 1 (functions 2-3), 2 (functions 4-5)
+    int wheel_position_in_set = 0;  // Position within set: 0 or 1
+
     system("clear");
 
     if (debug > 0) {
         if (debug > 2)
             debug = 2;
-        printf("Version 1.5.0 - Modular Architecture\n");
+        printf("Version 1.5.1 - Wheel Toggle Modes\n");
         printf("Debug level: %d\n", debug);
     }
 
@@ -259,9 +265,14 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                 }
 
                 printf("Driver is running!\n");
-                printf("Enhanced Leader Key System v1.5.0\n");
+                printf("Enhanced Leader Key System v1.5.1\n");
                 printf("Mode: %s | Timeout: %d ms\n",
                        leader_mode_to_string(config->leader.mode), config->leader.timeout_ms);
+                printf("Wheel Mode: %s", config->wheel_mode == WHEEL_MODE_SEQUENTIAL ? "sequential" : "sets");
+                if (config->wheel_mode == WHEEL_MODE_SETS) {
+                    printf(" | Click Timeout: %d ms", config->wheel_click_timeout_ms);
+                }
+                printf("\n");
                 printf("Press leader button first, then eligible buttons for combinations.\n");
 
                 err = 0;
@@ -288,6 +299,72 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                             printf("Unable to retrieve data: %d\n", err);
                         }
                         break;
+                    }
+
+                    // Check if we have pending button 18 clicks that need to be processed
+                    if (config->wheel_mode == WHEEL_MODE_SETS && button18_click_count > 0 &&
+                        (last_button18_time.tv_sec != 0 || last_button18_time.tv_usec != 0)) {
+                        struct timeval now;
+                        gettimeofday(&now, NULL);
+                        long time_since_last_click =
+                            (now.tv_sec - last_button18_time.tv_sec) * 1000 +
+                            (now.tv_usec - last_button18_time.tv_usec) / 1000;
+
+                        // If timeout has expired, process the accumulated clicks
+                        if (time_since_last_click >= config->wheel_click_timeout_ms) {
+                            int final_click_count = button18_click_count;
+                            button18_click_count = 0;
+                            last_button18_time.tv_sec = 0;
+                            last_button18_time.tv_usec = 0;
+
+                            if (debug == 1) {
+                                printf("Sets mode - Button 18 clicks: %d\n", final_click_count);
+                            }
+
+                            // Process based on click count
+                            if (final_click_count == 1) {
+                                // Single-click: toggle within current set
+                                wheel_position_in_set = 1 - wheel_position_in_set;
+                            } else if (final_click_count == 2) {
+                                // Double-click: toggle between Set 0 and Set 1
+                                if (wheel_current_set == 0) {
+                                    wheel_current_set = 1;
+                                } else if (wheel_current_set == 1) {
+                                    wheel_current_set = 0;
+                                } else {
+                                    // From Set 2, go to Set 1 (not Set 0)
+                                    wheel_current_set = 1;
+                                }
+                                wheel_position_in_set = 0;  // Start at first function in new set
+                            } else if (final_click_count >= 3) {
+                                // Triple-click: toggle to/from Set 2
+                                if (wheel_current_set == 2) {
+                                    // From Set 2, go back to Set 0
+                                    wheel_current_set = 0;
+                                } else {
+                                    // From Set 0 or 1, go to Set 2
+                                    wheel_current_set = 2;
+                                }
+                                wheel_position_in_set = 0;  // Start at first function in new set
+                            }
+
+                            // Calculate actual wheel function index
+                            // Note: wheelFunction may be >= totalWheels if incomplete sets exist
+                            // That's OK - wheel turn handler checks bounds before executing
+                            wheelFunction = (wheel_current_set * 2) + wheel_position_in_set;
+
+                            if (debug == 1) {
+                                printf("Set: %d | Position: %d | Wheel Function: %d\n",
+                                       wheel_current_set, wheel_position_in_set, wheelFunction);
+                                if (wheelFunction >= 0 && wheelFunction < config->totalWheels) {
+                                    printf("Function: %s | %s\n",
+                                           config->wheelEvents[wheelFunction].left ? config->wheelEvents[wheelFunction].left : "(null)",
+                                           config->wheelEvents[wheelFunction].right ? config->wheelEvents[wheelFunction].right : "(null)");
+                                } else {
+                                    printf("Function: (not defined - incomplete set)\n");
+                                }
+                            }
+                        }
                     }
 
                     // Convert data to keycodes
@@ -333,14 +410,49 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                                         prevEvent.function = "";
                                     }
                                 } else if (strcmp(config->events[button_index].function, "swap") == 0) {
-                                    if (wheelFunction != config->totalWheels - 1) {
-                                        wheelFunction++;
-                                    } else
-                                        wheelFunction = 0;
-                                    if (debug == 1) {
-                                        printf("Function: %s | %s\n",
-                                               config->wheelEvents[wheelFunction].left ? config->wheelEvents[wheelFunction].left : "(null)",
-                                               config->wheelEvents[wheelFunction].right ? config->wheelEvents[wheelFunction].right : "(null)");
+                                    // Check wheel mode
+                                    if (config->wheel_mode == WHEEL_MODE_SEQUENTIAL) {
+                                        // Sequential mode: simple cycling through all functions
+                                        if (wheelFunction != config->totalWheels - 1) {
+                                            wheelFunction++;
+                                        } else {
+                                            wheelFunction = 0;
+                                        }
+                                        if (debug == 1) {
+                                            printf("Sequential mode - Wheel Function: %d\n", wheelFunction);
+                                            printf("Function: %s | %s\n",
+                                                   config->wheelEvents[wheelFunction].left ? config->wheelEvents[wheelFunction].left : "(null)",
+                                                   config->wheelEvents[wheelFunction].right ? config->wheelEvents[wheelFunction].right : "(null)");
+                                        }
+                                    } else {
+                                        // Sets mode: multi-click detection for set-based navigation
+                                        // Just record the click - processing happens at the top of the event loop
+                                        struct timeval now;
+                                        gettimeofday(&now, NULL);
+
+                                        long time_since_last_click = 0;
+                                        if (last_button18_time.tv_sec != 0 || last_button18_time.tv_usec != 0) {
+                                            time_since_last_click =
+                                                (now.tv_sec - last_button18_time.tv_sec) * 1000 +
+                                                (now.tv_usec - last_button18_time.tv_usec) / 1000;
+                                        }
+
+                                        // If click is within timeout window, increment count
+                                        if (time_since_last_click > 0 && time_since_last_click < config->wheel_click_timeout_ms) {
+                                            button18_click_count++;
+                                            if (debug == 1) {
+                                                printf("Button 18 click recorded (count now: %d)\n", button18_click_count);
+                                            }
+                                        } else {
+                                            // This is a new click sequence
+                                            button18_click_count = 1;
+                                            if (debug == 1) {
+                                                printf("Button 18 new click sequence started\n");
+                                            }
+                                        }
+
+                                        last_button18_time = now;
+                                        // Don't process yet - wait for timeout (checked at top of loop)
                                     }
                                 } else if (strcmp(config->events[button_index].function, "mouse1") == 0 ||
                                            strcmp(config->events[button_index].function, "mouse2") == 0 ||

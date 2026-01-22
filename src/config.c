@@ -6,6 +6,26 @@
 #include <pwd.h>
 #include <unistd.h>
 
+// Helper function to convert wheel mode enum to string
+static const char* wheel_mode_to_string(wheel_mode_t mode) {
+    switch (mode) {
+        case WHEEL_MODE_SEQUENTIAL: return "sequential";
+        case WHEEL_MODE_SETS: return "sets";
+        default: return "unknown";
+    }
+}
+
+// Helper function to parse wheel mode string to enum
+static wheel_mode_t parse_wheel_mode(const char* mode_str) {
+    if (strcasecmp(mode_str, "sequential") == 0) {
+        return WHEEL_MODE_SEQUENTIAL;
+    } else if (strcasecmp(mode_str, "sets") == 0) {
+        return WHEEL_MODE_SETS;
+    }
+    // Default to sequential for backward compatibility
+    return WHEEL_MODE_SEQUENTIAL;
+}
+
 // Create a new configuration structure
 config_t* config_create(void) {
     config_t* config = malloc(sizeof(config_t));
@@ -31,6 +51,8 @@ config_t* config_create(void) {
     config->totalButtons = 0;
     config->totalWheels = 0;
     config->enable_uclogic = 0;
+    config->wheel_click_timeout_ms = 300;  // 300ms default timeout
+    config->wheel_mode = WHEEL_MODE_SEQUENTIAL;  // Default to sequential (legacy behavior)
 
     // Initialize leader state
     config->leader.leader_button = -1;
@@ -136,6 +158,28 @@ int config_load(config_t* config, const char* filename, int debug) {
                 config->enable_uclogic = 0;
                 if (debug) printf("Config: enable_uclogic = false\n");
             }
+            continue;
+        }
+
+        // Parse wheel_click_timeout
+        if (strncasecmp(line, "wheel_click_timeout:", 20) == 0) {
+            char* value = line + 20;
+            while (*value == ' ') value++;
+            int timeout = atoi(value);
+            // Enforce hard limits: 20-990ms
+            if (timeout < 20) timeout = 20;
+            if (timeout > 990) timeout = 990;
+            config->wheel_click_timeout_ms = timeout;
+            if (debug) printf("Config: wheel_click_timeout = %d ms\n", config->wheel_click_timeout_ms);
+            continue;
+        }
+
+        // Parse wheel_mode
+        if (strncasecmp(line, "wheel_mode:", 11) == 0) {
+            char* value = line + 11;
+            while (*value == ' ') value++;
+            config->wheel_mode = parse_wheel_mode(value);
+            if (debug) printf("Config: wheel_mode = %s\n", wheel_mode_to_string(config->wheel_mode));
             continue;
         }
 
@@ -348,5 +392,9 @@ void config_print(const config_t* config, int debug) {
     printf("Leader function: '%s'\n", config->leader.leader_function ? config->leader.leader_function : "(null)");
     printf("Leader timeout: %d ms\n", config->leader.timeout_ms);
     printf("Leader mode: %s\n", leader_mode_to_string(config->leader.mode));
+
+    printf("\n=== Wheel Click Configuration ===\n");
+    printf("Multi-click timeout: %d ms\n", config->wheel_click_timeout_ms);
+    printf("Wheel mode: %s\n", wheel_mode_to_string(config->wheel_mode));
     printf("\n");
 }
