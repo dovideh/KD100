@@ -324,73 +324,34 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                             // Process based on click count
                             if (final_click_count == 1) {
                                 // Single-click: toggle within current set
-                                int new_position = 1 - wheel_position_in_set;
-                                int target_function = (wheel_current_set * 2) + new_position;
-
-                                // Only toggle if the target function exists
-                                if (target_function < config->totalWheels) {
-                                    wheel_position_in_set = new_position;
-                                } else {
-                                    if (debug == 1) {
-                                        printf("Toggle ignored: function %d doesn't exist (have %d functions)\n",
-                                               target_function, config->totalWheels);
-                                    }
-                                }
+                                wheel_position_in_set = 1 - wheel_position_in_set;
                             } else if (final_click_count == 2) {
-                                // Double-click: toggle between Set 0 and Set 1 (only if target set exists)
-                                int target_set = -1;
+                                // Double-click: toggle between Set 0 and Set 1
                                 if (wheel_current_set == 0) {
-                                    target_set = 1;
+                                    wheel_current_set = 1;
                                 } else if (wheel_current_set == 1) {
-                                    target_set = 0;
+                                    wheel_current_set = 0;
                                 } else {
                                     // From Set 2, go to Set 0
-                                    target_set = 0;
+                                    wheel_current_set = 0;
                                 }
-
-                                // Check if target set has at least the first function
-                                int target_function = target_set * 2;
-                                if (target_function < config->totalWheels) {
-                                    wheel_current_set = target_set;
-                                    wheel_position_in_set = 0;  // Start at first function in new set
-                                } else {
-                                    if (debug == 1) {
-                                        printf("Double-click ignored: Set %d doesn't exist (have %d functions)\n",
-                                               target_set + 1, config->totalWheels);
-                                    }
-                                }
+                                wheel_position_in_set = 0;  // Start at first function in new set
                             } else if (final_click_count >= 3) {
-                                // Triple-click: toggle to/from Set 3 (only if Set 3 exists - need at least 5 functions)
-                                if (config->totalWheels >= 5) {
-                                    int target_set = (wheel_current_set == 2) ? 0 : 2;
-                                    int target_function = target_set * 2;
-
-                                    // Double-check that target function exists
-                                    if (target_function < config->totalWheels) {
-                                        wheel_current_set = target_set;
-                                        wheel_position_in_set = 0;  // Start at first function in new set
-                                    } else {
-                                        if (debug == 1) {
-                                            printf("Triple-click ignored: Set %d doesn't exist\n", target_set + 1);
-                                        }
-                                    }
+                                // Triple-click: toggle to/from Set 2
+                                if (wheel_current_set == 2) {
+                                    // From Set 2, go back to Set 0
+                                    wheel_current_set = 0;
                                 } else {
-                                    if (debug == 1) {
-                                        printf("Triple-click ignored: Set 3 requires at least 5 wheel functions (have %d)\n",
-                                               config->totalWheels);
-                                    }
+                                    // From Set 0 or 1, go to Set 2
+                                    wheel_current_set = 2;
                                 }
+                                wheel_position_in_set = 0;  // Start at first function in new set
                             }
 
                             // Calculate actual wheel function index
+                            // Note: wheelFunction may be >= totalWheels if incomplete sets exist
+                            // That's OK - wheel turn handler checks bounds before executing
                             wheelFunction = (wheel_current_set * 2) + wheel_position_in_set;
-
-                            // Ensure we don't go beyond available wheels
-                            if (wheelFunction >= config->totalWheels) {
-                                wheelFunction = 0;
-                                wheel_current_set = 0;
-                                wheel_position_in_set = 0;
-                            }
 
                             if (debug == 1) {
                                 printf("Set: %d | Position: %d | Wheel Function: %d\n",
