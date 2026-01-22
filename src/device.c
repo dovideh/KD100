@@ -79,7 +79,7 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
 
         while ((dev = devs[d++]) != NULL) {
             struct libusb_device_descriptor devDesc;
-            char info[200] = "";
+            unsigned char info[200] = "";
             err = libusb_get_device_descriptor(dev, &devDesc);
 
             if (err < 0) {
@@ -118,9 +118,9 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                         }
                         err = libusb_get_string_descriptor_ascii(handle, devDesc.iProduct, info, 200);
                         if (debug > 0) {
-                            printf("\n#%d | %04x:%04x : %s\n", d, DEVICE_VID, DEVICE_PID, info);
+                            printf("\n#%d | %04x:%04x : %s\n", d, DEVICE_VID, DEVICE_PID, (char*)info);
                         }
-                        if (strlen(info) == 0 || strcmp("Huion Tablet_KD100", info) == 0) {
+                        if (strlen((char*)info) == 0 || strcmp("Huion Tablet_KD100", (char*)info) == 0) {
                             break;
                         } else {
                             libusb_close(handle);
