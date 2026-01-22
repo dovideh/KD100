@@ -1,13 +1,21 @@
 # Compiler and flags
 CC = gcc
-CFAGS = -Wall -Wextra -Wpedantic
+CFLAGS = -Wall -Wextra -Wpedantic -Isrc
 LDFLAGS = -lusb-1.0 -ldl
 USER = $(shell id -u)
 DIR = $(shell pwd)
 HOME = "/home/"$(shell logname)
 TARGET = KD100
 DEBUG_TARGET = KD100-debug
-VERSION = 1.4.3
+VERSION = 1.5.0
+
+# Source files
+SRC_DIR = src
+SOURCES = $(SRC_DIR)/main.c $(SRC_DIR)/config.c $(SRC_DIR)/device.c \
+          $(SRC_DIR)/handler.c $(SRC_DIR)/leader.c $(SRC_DIR)/utils.c \
+          $(SRC_DIR)/compat.c
+OBJECTS = $(SOURCES:.c=.o)
+LEGACY_SOURCE = KD100.c
 
 # Debug flags
 DEBUG_FLAGS = -g -ggdb3 -O0 -fno-omit-frame-pointer -fno-inline \
@@ -19,19 +27,24 @@ RELEASE_FLAGS = -O2 -DNDEBUG
 # Default target
 all: $(TARGET)
 
-# Standard build
-$(TARGET): KD100.c
-	$(CC) $(CFLAGS) KD100.c $(LDFLAGS) -o $(TARGET)
-	@echo "Build complete: $(TARGET)"
+# Standard build (modular)
+$(TARGET): $(SOURCES)
+	$(CC) $(CFLAGS) $(SOURCES) $(LDFLAGS) -o $(TARGET)
+	@echo "Build complete: $(TARGET) (v$(VERSION) - Modular)"
 	@echo "Run './$(TARGET)' to execute"
+
+# Legacy build (monolithic)
+legacy: $(LEGACY_SOURCE)
+	$(CC) $(CFLAGS) $(LEGACY_SOURCE) $(LDFLAGS) -o $(TARGET)-legacy
+	@echo "Legacy build complete: $(TARGET)-legacy (v1.4.9)"
 
 # Debug build with maximum debugability
 debug: CFLAGS += $(DEBUG_FLAGS)
 debug: $(DEBUG_TARGET)
 
-$(DEBUG_TARGET): KD100.c
-	$(CC) $(CFLAGS) KD100.c $(LDFLAGS) -o $(DEBUG_TARGET)
-	@echo "✓ Debug build complete: $(DEBUG_TARGET)"
+$(DEBUG_TARGET): $(SOURCES)
+	$(CC) $(CFLAGS) $(SOURCES) $(LDFLAGS) -o $(DEBUG_TARGET)
+	@echo "✓ Debug build complete: $(DEBUG_TARGET) (v$(VERSION) - Modular)"
 	@echo "✓ Debug symbols: $(shell readelf -S $(DEBUG_TARGET) 2>/dev/null | grep -c "\.debug" || echo 0) sections"
 	@echo "✓ Size: $(shell stat -c%s $(DEBUG_TARGET) 2>/dev/null || echo 0) bytes"
 	@echo ""
@@ -44,10 +57,10 @@ $(DEBUG_TARGET): KD100.c
 release: CFLAGS += $(RELEASE_FLAGS)
 release: $(TARGET)-release
 
-$(TARGET)-release: KD100.c
-	$(CC) $(CFLAGS) KD100.c $(LDFLAGS) -o $(TARGET)-release
+$(TARGET)-release: $(SOURCES)
+	$(CC) $(CFLAGS) $(SOURCES) $(LDFLAGS) -o $(TARGET)-release
 	@strip $(TARGET)-release 2>/dev/null || true
-	@echo "Release build complete: $(TARGET)-release"
+	@echo "Release build complete: $(TARGET)-release (v$(VERSION) - Modular)"
 	@echo "Size: $(shell stat -c%s $(TARGET)-release) bytes"
 
 # Install target (keeps your original logic)
@@ -101,9 +114,9 @@ asan: CFLAGS += -fsanitize=address -fno-omit-frame-pointer
 asan: LDFLAGS += -fsanitize=address
 asan: $(TARGET)-asan
 
-$(TARGET)-asan: KD100.c
-	$(CC) $(CFLAGS) KD100.c $(LDFLAGS) -o $(TARGET)-asan
-	@echo "AddressSanitizer build complete: $(TARGET)-asan"
+$(TARGET)-asan: $(SOURCES)
+	$(CC) $(CFLAGS) $(SOURCES) $(LDFLAGS) -o $(TARGET)-asan
+	@echo "AddressSanitizer build complete: $(TARGET)-asan (v$(VERSION))"
 	@echo "Run with: ./$(TARGET)-asan"
 
 # Build with undefined behavior sanitizer
@@ -111,20 +124,21 @@ ubsan: CFLAGS += -fsanitize=undefined
 ubsan: LDFLAGS += -fsanitize=undefined
 ubsan: $(TARGET)-ubsan
 
-$(TARGET)-ubsan: KD100.c
-	$(CC) $(CFLAGS) KD100.c $(LDFLAGS) -o $(TARGET)-ubsan
-	@echo "UndefinedBehaviorSanitizer build complete: $(TARGET)-ubsan"
+$(TARGET)-ubsan: $(SOURCES)
+	$(CC) $(CFLAGS) $(SOURCES) $(LDFLAGS) -o $(TARGET)-ubsan
+	@echo "UndefinedBehaviorSanitizer build complete: $(TARGET)-ubsan (v$(VERSION))"
 
 # Clean targets
 clean:
-	rm -f $(TARGET) $(DEBUG_TARGET) $(TARGET)-release $(TARGET)-asan $(TARGET)-ubsan KD100-1421
-	rm -f *.o *.log core core.*
+	rm -f $(TARGET) $(DEBUG_TARGET) $(TARGET)-release $(TARGET)-asan $(TARGET)-ubsan $(TARGET)-legacy KD100-1421
+	rm -f $(OBJECTS) *.o *.log core core.*
 	@echo "Cleaned build artifacts"
 
 # Help target
 help:
 	@echo "Available targets:"
-	@echo "  make              - Build standard version"
+	@echo "  make              - Build standard version (v$(VERSION) - Modular)"
+	@echo "  make legacy       - Build legacy monolithic version (v1.4.9)"
 	@echo "  make debug        - Build with full debug symbols and crash handler"
 	@echo "  make release      - Build optimized release version"
 	@echo "  make install      - Install system-wide (requires root)"
@@ -143,5 +157,5 @@ version:
 	@echo "KD100 Makefile v$(VERSION)"
 	@echo "Compiler: $(shell $(CC) --version | head -1)"
 
-.PHONY: all debug release install 1.4 gdb valgrind strace analyze asan ubsan clean help version
+.PHONY: all legacy debug release install 1.4 gdb valgrind strace analyze asan ubsan clean help version
 
