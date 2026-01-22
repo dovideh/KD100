@@ -17,7 +17,7 @@ int is_module_loaded(const char* module_name) {
 int try_hidraw_access(void) {
     DIR *dir;
     struct dirent *ent;
-    char path[256];
+    char path[512];
     char buf[256];
 
     dir = opendir("/dev");

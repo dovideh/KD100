@@ -79,7 +79,7 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
 
         while ((dev = devs[d++]) != NULL) {
             struct libusb_device_descriptor devDesc;
-            unsigned char info[200] = "";
+            char info[200] = "";
             err = libusb_get_device_descriptor(dev, &devDesc);
 
             if (err < 0) {
@@ -362,7 +362,7 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
 
                     if (debug == 2 || dry) {
                         printf("DATA: [%d", data[0]);
-                        for (int i = 1; i < sizeof(data); i++) {
+                        for (size_t i = 1; i < sizeof(data); i++) {
                             printf(", %d", data[i]);
                         }
                         printf("]\n");
