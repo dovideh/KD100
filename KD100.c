@@ -1,8 +1,11 @@
 /*
-	V1.4.8 - Leader Key System Fixed
+	V1.4.9 - Enhanced Leader Key System
 	https://github.com/mckset/KD100.git
 	KD100 Linux driver for X11 desktops
-	Fixed leader key system with proper timing
+	Features:
+	- Configurable leader modes (one_shot, sticky, toggle)
+	- Per-button leader eligibility
+	- Fixed timing system
 */
 
 #include <libusb-1.0/libusb.h>
@@ -144,9 +147,17 @@ typedef struct event event;
 typedef struct wheel wheel;
 typedef struct leader_state leader_state;
 
+// Leader mode enumeration
+typedef enum {
+    LEADER_MODE_ONE_SHOT,    // Leader + 1 key = combination, then reset (default)
+    LEADER_MODE_STICKY,      // Leader stays active for multiple keys until timeout
+    LEADER_MODE_TOGGLE       // Leader toggles on/off (press to enable, press again to disable)
+} leader_mode_t;
+
 struct event{
 	int type;
 	char* function;
+	int leader_eligible;  // 0 = not eligible, 1 = eligible, -1 = not set (default eligible)
 };
 
 struct wheel {
@@ -161,6 +172,8 @@ struct leader_state {
     struct timeval leader_press_time; // When was leader pressed?
     char* leader_function;    // What function does the leader have?
     int timeout_ms;           // Leader timeout in milliseconds
+    leader_mode_t mode;       // Leader mode (one_shot, sticky, toggle)
+    int toggle_state;         // For toggle mode: 0 = off, 1 = on
 };
 
 void GetDevice(libusb_context*, int, int, int);
@@ -177,9 +190,8 @@ void print_compatibility_warning();
 long get_time_ms();
 long time_diff_ms(struct timeval start, struct timeval end);
 void trim_trailing_spaces(char* str);
-
-const int vid = 0x256c;
-const int pid = 0x006d;
+leader_mode_t parse_leader_mode(const char* mode_str);
+const char* leader_mode_to_string(leader_mode_t mode);
 
 // Get current time in milliseconds
 long get_time_ms() {
@@ -203,6 +215,31 @@ void trim_trailing_spaces(char* str) {
     while (len > 0 && isspace((unsigned char)str[len - 1])) {
         str[len - 1] = '\0';
         len--;
+    }
+}
+
+// Parse leader mode string
+leader_mode_t parse_leader_mode(const char* mode_str) {
+    if (mode_str == NULL) return LEADER_MODE_ONE_SHOT;
+    
+    if (strcasecmp(mode_str, "sticky") == 0) {
+        return LEADER_MODE_STICKY;
+    } else if (strcasecmp(mode_str, "toggle") == 0) {
+        return LEADER_MODE_TOGGLE;
+    } else if (strcasecmp(mode_str, "one_shot") == 0 || strcasecmp(mode_str, "oneshot") == 0) {
+        return LEADER_MODE_ONE_SHOT;
+    }
+    
+    return LEADER_MODE_ONE_SHOT; // Default
+}
+
+// Convert leader mode to string
+const char* leader_mode_to_string(leader_mode_t mode) {
+    switch (mode) {
+        case LEADER_MODE_ONE_SHOT: return "one_shot";
+        case LEADER_MODE_STICKY: return "sticky";
+        case LEADER_MODE_TOGGLE: return "toggle";
+        default: return "unknown";
     }
 }
 
@@ -235,6 +272,7 @@ void reset_leader_state(leader_state* state) {
     state->last_button = -1;
     state->leader_press_time.tv_sec = 0;
     state->leader_press_time.tv_usec = 0;
+    state->toggle_state = 0; // Also reset toggle state
 }
 
 // Send leader combination
@@ -252,8 +290,10 @@ void send_leader_combination(leader_state* state, char* combination, int debug) 
     snprintf(cmd, sizeof(cmd), "xdotool key %s", combination);
     system(cmd);
     
-    // Reset leader state after sending
-    reset_leader_state(state);
+    // Reset leader state after sending (except for sticky mode)
+    if (state->mode != LEADER_MODE_STICKY) {
+        reset_leader_state(state);
+    }
 }
 
 // Process leader key combinations
@@ -283,20 +323,44 @@ void process_leader_combination(leader_state* state, event* events, int button_i
     // Check if this button is configured as a leader
     if (strcmp(button_func, "leader") == 0) {
         // This button is the leader itself
-        if (!state->leader_active) {
-            // Activate leader mode
-            state->leader_active = 1;
-            gettimeofday(&state->leader_press_time, NULL);
-            state->last_button = button_index;
-            
-            if (debug == 1) {
-                printf("Leader mode activated by button %d\n", button_index);
+        if (state->mode == LEADER_MODE_TOGGLE) {
+            // Toggle mode: press to enable, press again to disable
+            if (!state->toggle_state) {
+                // Enable toggle mode
+                state->toggle_state = 1;
+                state->leader_active = 1;
+                gettimeofday(&state->leader_press_time, NULL);
+                state->last_button = button_index;
+                
+                if (debug == 1) {
+                    printf("Leader toggle mode ENABLED by button %d\n", button_index);
+                }
+            } else {
+                // Disable toggle mode
+                state->toggle_state = 0;
+                state->leader_active = 0;
+                
+                if (debug == 1) {
+                    printf("Leader toggle mode DISABLED by button %d\n", button_index);
+                }
             }
         } else {
-            // Leader pressed again - cancel leader mode
-            reset_leader_state(state);
-            if (debug == 1) {
-                printf("Leader mode cancelled\n");
+            // One-shot or sticky mode
+            if (!state->leader_active) {
+                // Activate leader mode
+                state->leader_active = 1;
+                gettimeofday(&state->leader_press_time, NULL);
+                state->last_button = button_index;
+                
+                if (debug == 1) {
+                    printf("Leader mode activated by button %d\n", button_index);
+                }
+            } else {
+                // Leader pressed again - cancel leader mode
+                reset_leader_state(state);
+                if (debug == 1) {
+                    printf("Leader mode cancelled\n");
+                }
             }
         }
         return;
@@ -304,37 +368,64 @@ void process_leader_combination(leader_state* state, event* events, int button_i
     
     // Check if we're in leader mode
     if (state->leader_active) {
-        // Calculate time since leader was pressed
-        struct timeval now;
-        gettimeofday(&now, NULL);
-        long elapsed = time_diff_ms(state->leader_press_time, now);
-        
-        if (elapsed > state->timeout_ms) {
-            // Leader timeout - reset
+        // Check eligibility first
+        if (events[button_index].leader_eligible == 0) {
+            // Button is not eligible for leader modifications
             if (debug == 1) {
-                printf("Leader timeout (%ld ms > %d ms)\n", elapsed, state->timeout_ms);
+                printf("Button %d not eligible for leader - handling normally\n", button_index);
             }
-            reset_leader_state(state);
+            
+            // For sticky mode, we might want to keep leader active
+            if (state->mode != LEADER_MODE_STICKY) {
+                reset_leader_state(state);
+            }
+            
             // Fall through to normal button handling
         } else {
-            // We have a leader combination!
-            // Format: leader_function + button_function
-            char combination[256] = "";
+            // Button is eligible for leader modifications
+            // Calculate time since leader was pressed (for timeout)
+            struct timeval now;
+            gettimeofday(&now, NULL);
+            long elapsed = time_diff_ms(state->leader_press_time, now);
             
-            if (state->leader_function != NULL && strlen(state->leader_function) > 0) {
-                strcpy(combination, state->leader_function);
-                strcat(combination, "+");
+            if (elapsed > state->timeout_ms && state->mode != LEADER_MODE_TOGGLE) {
+                // Leader timeout - reset (except for toggle mode)
+                if (debug == 1) {
+                    printf("Leader timeout (%ld ms > %d ms)\n", elapsed, state->timeout_ms);
+                }
+                reset_leader_state(state);
+                // Fall through to normal button handling
+            } else {
+                // We have a leader combination!
+                // Format: leader_function + button_function
+                char combination[256] = "";
+                
+                if (state->leader_function != NULL && strlen(state->leader_function) > 0) {
+                    strcpy(combination, state->leader_function);
+                    strcat(combination, "+");
+                }
+                
+                strcat(combination, button_func);
+                
+                // Send the combination
+                send_leader_combination(state, combination, debug);
+                
+                // For sticky mode, update the timer to extend timeout
+                if (state->mode == LEADER_MODE_STICKY) {
+                    gettimeofday(&state->leader_press_time, NULL);
+                }
+                
+                // For one-shot mode, reset after sending
+                if (state->mode == LEADER_MODE_ONE_SHOT) {
+                    reset_leader_state(state);
+                }
+                
+                return; // Don't also handle as normal button
             }
-            
-            strcat(combination, button_func);
-            
-            // Send the combination
-            send_leader_combination(state, combination, debug);
-            return; // Don't also handle as normal button
         }
     }
     
-    // Not in leader mode or leader timed out - handle normal button press
+    // Not in leader mode, leader timed out, or button not eligible - handle normal button press
     if (strcmp(button_func, "NULL") != 0 && strcmp(button_func, "swap") != 0 &&
         strcmp(button_func, "mouse1") != 0 && strcmp(button_func, "mouse2") != 0 &&
         strcmp(button_func, "mouse3") != 0 && strcmp(button_func, "mouse4") != 0 &&
@@ -428,6 +519,8 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 	leader.leader_press_time.tv_usec = 0;
 	leader.leader_function = NULL;
 	leader.timeout_ms = 1000;  // 1 second timeout for combinations
+	leader.mode = LEADER_MODE_ONE_SHOT;  // Default mode
+	leader.toggle_state = 0;
 
 	int c=0;
 	char indi[] = "|/-\\";
@@ -437,7 +530,7 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 	if (debug > 0){
 		if (debug > 2)
 			debug=2;
-		printf("Version 1.4.8 - Leader Key System (Fixed)\n");
+		printf("Version 1.4.9 - Enhanced Leader Key System\n");
 		printf("Debug level: %d\n", debug);
 	}		
 
@@ -493,6 +586,7 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 	for (int i = 0; i < totalButtons; i++) {
 		events[i].function = NULL;
 		events[i].type = 0;
+		events[i].leader_eligible = -1;  // -1 = not set (default to eligible)
 	}
 	
 	// Initialize wheel events
@@ -554,6 +648,14 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		continue;
 	    }
 	    
+	    if (strncasecmp(line, "leader_mode:", 12) == 0) {
+		char* value = line + 12;
+		while (*value == ' ') value++;
+		leader.mode = parse_leader_mode(value);
+		if (debug) printf("Config: leader_mode = %s\n", leader_mode_to_string(leader.mode));
+		continue;
+	    }
+	    
 	    if (strncasecmp(line, "button ", 7) == 0) {
 		char* num_str = line + 7;
 		while (*num_str == ' ') num_str++;
@@ -573,6 +675,7 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		    for (int j = totalButtons; j <= button; j++) {
 			events[j].function = NULL;
 			events[j].type = 0;
+			events[j].leader_eligible = -1;  // Default: not set
 		    }
 		    totalButtons = button+1;
 		}
@@ -583,6 +686,20 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		char* type_str = line + 5;
 		while (*type_str == ' ') type_str++;
 		events[button].type = atoi(type_str);
+		continue;
+	    }
+	    
+	    if (strncasecmp(line, "leader_eligible:", 16) == 0 && button != -1) {
+		char* value = line + 16;
+		while (*value == ' ') value++;
+		if (strcasecmp(value, "false") == 0) {
+		    events[button].leader_eligible = 0;
+		} else if (strcasecmp(value, "true") == 0) {
+		    events[button].leader_eligible = 1;
+		} else {
+		    events[button].leader_eligible = atoi(value);
+		}
+		if (debug) printf("Config: button %d leader_eligible = %d\n", button, events[button].leader_eligible);
 		continue;
 	    }
 	    
@@ -668,6 +785,14 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 	
 	fclose(f);
 	
+	// Set default eligibility for buttons that weren't explicitly configured
+	for (int i = 0; i < totalButtons; i++) {
+		if (events[i].leader_eligible == -1) {
+			// Default: eligible for all buttons except wheel button (18)
+			events[i].leader_eligible = (i == 18) ? 0 : 1;
+		}
+	}
+	
 	wheelFunction=0;
 	if (rightWheels > leftWheels)
 		totalWheels = rightWheels;
@@ -678,9 +803,15 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		printf("\n=== Button Configuration ===\n");
 		for (int i = 0; i < totalButtons; i++) {
 			if (events[i].function != NULL) {
-				printf("Button %2d: Type: %d | Function: '%s'\n", i, events[i].type, events[i].function);
+				printf("Button %2d: Type: %d | Function: '%s' | Leader Eligible: %s\n", 
+				       i, events[i].type, events[i].function,
+				       events[i].leader_eligible == 1 ? "YES" : 
+				       events[i].leader_eligible == 0 ? "NO" : "DEFAULT");
 			} else {
-				printf("Button %2d: Type: %d | Function: (not set)\n", i, events[i].type);
+				printf("Button %2d: Type: %d | Function: (not set) | Leader Eligible: %s\n", 
+				       i, events[i].type,
+				       events[i].leader_eligible == 1 ? "YES" : 
+				       events[i].leader_eligible == 0 ? "NO" : "DEFAULT");
 			}
 		}
 		printf("\n=== Wheel Configuration ===\n");
@@ -693,6 +824,7 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 		printf("Leader button: %d\n", leader.leader_button);
 		printf("Leader function: '%s'\n", leader.leader_function ? leader.leader_function : "(null)");
 		printf("Leader timeout: %d ms\n", leader.timeout_ms);
+		printf("Leader mode: %s\n", leader_mode_to_string(leader.mode));
 		printf("\n");
 	}
 	
@@ -1010,8 +1142,10 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 				}
 
 				printf("Driver is running!\n");
-				printf("Leader key system enabled!\n");
-				printf("Press leader button first, then another button for combinations.\n");
+				printf("Enhanced Leader Key System v1.4.9\n");
+				printf("Mode: %s | Timeout: %d ms\n", 
+				       leader_mode_to_string(leader.mode), leader.timeout_ms);
+				printf("Press leader button first, then eligible buttons for combinations.\n");
 
 				err = 0;
 				prevEvent.function = "";
@@ -1072,7 +1206,7 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 						int button_index = find_button_index(keycode);
 						
 						if (button_index != -1){
-							// Process button press
+							// Process button press with leader system
 							process_leader_combination(&leader, events, button_index, debug);
 							
 							// Also handle legacy single-button events for compatibility
@@ -1119,7 +1253,8 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 							struct timeval now;
 							gettimeofday(&now, NULL);
 							long elapsed = time_diff_ms(leader.leader_press_time, now);
-							printf("Leader active: YES (%ld ms elapsed)\n", elapsed);
+							printf("Leader active: YES (%ld ms elapsed, mode: %s)\n", 
+							       elapsed, leader_mode_to_string(leader.mode));
 						} else {
 							printf("Leader active: NO\n");
 						}
@@ -1290,14 +1425,25 @@ int main(int args, char *in[]){
 			printf("\t-d [-d]\t\tEnable debug outputs (use twice to view data sent by the device)\n");
 			printf("\t-dry \t\tDisplay data sent by the device without sending events\n");
 			printf("\t-h\t\tDisplays this message\n");
-			printf("\nNew in v1.4.8 - LEADER KEY SYSTEM (FIXED):\n");
-			printf("\t• Designate one button as the leader (e.g., Button 16)\n");
-			printf("\t• Press leader first, then another button for combinations\n");
-			printf("\t• Example: Button 16 (leader) + Button 0 (b) = shift+b\n");
-			printf("\t• Config options in default.cfg:\n");
-			printf("\t  leader_button: 16          # Which button is the leader\n");
-			printf("\t  leader_function: shift     # What modifier to apply\n");
-			printf("\t  leader_timeout: 1000       # Timeout in milliseconds\n");
+			printf("\nNew in v1.4.9 - ENHANCED LEADER KEY SYSTEM:\n");
+			printf("\t• Configurable leader modes:\n");
+			printf("\t  - one_shot: Leader + 1 key = combination, then reset (default)\n");
+			printf("\t  - sticky: Leader stays active for multiple keys until timeout\n");
+			printf("\t  - toggle: Leader toggles on/off (press to enable, press again to disable)\n");
+			printf("\t• Per-button eligibility: Control which buttons can be modified by leader\n");
+			printf("\t• Example config in default.cfg:\n");
+			printf("\t  leader_button: 16\n");
+			printf("\t  leader_function: shift\n");
+			printf("\t  leader_timeout: 1000\n");
+			printf("\t  leader_mode: sticky\n");
+			printf("\t  button 0\n");
+			printf("\t  type: 0\n");
+			printf("\t  function: b\n");
+			printf("\t  leader_eligible: true\n");
+			printf("\t  button 18\n");
+			printf("\t  type: 1\n");
+			printf("\t  function: swap\n");
+			printf("\t  leader_eligible: false\n");
 			printf("\nConfiguration:\n");
 			printf("\tAdd 'enable_uclogic: true' to config to work with hid_uclogic loaded\n");
 			printf("\tDefault: enable_uclogic: false (compatible with OpenTabletDriver)\n\n");
@@ -1347,8 +1493,8 @@ int main(int args, char *in[]){
 		}
 	}
 	
-	printf("\nKD100 Driver v1.4.8 - Leader Key System (Fixed)\n");
-	printf("Press leader button first, then another button for combinations!\n\n");
+	printf("\nKD100 Driver v1.4.9 - Enhanced Leader Key System\n");
+	printf("Features: Configurable modes | Per-button eligibility | Fixed timing\n\n");
 	
 	GetDevice(ctx, debug, accept, dry);
 	libusb_exit(ctx);
