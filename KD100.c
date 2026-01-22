@@ -139,6 +139,10 @@ void setup_crash_handler(void) {
 }
 #endif
 
+// Device identifiers
+const int vid = 0x256c;
+const int pid = 0x006d;
+
 int keycodes[] = {1, 2, 4, 8, 16, 32, 64, 128, 129, 130, 132, 136, 144, 160, 192, 256, 257, 258, 260, 641, 642};
 char* file = "default.cfg";
 int enable_uclogic = 0;
@@ -192,9 +196,6 @@ long time_diff_ms(struct timeval start, struct timeval end);
 void trim_trailing_spaces(char* str);
 leader_mode_t parse_leader_mode(const char* mode_str);
 const char* leader_mode_to_string(leader_mode_t mode);
-
-const int vid = 0x256c;
-const int pid = 0x006d;
 
 // Get current time in milliseconds
 long get_time_ms() {
@@ -269,13 +270,13 @@ int is_modifier_key(const char* key) {
     return 0;
 }
 
-// Reset leader state
+// Reset leader state (but preserve toggle state for toggle mode)
 void reset_leader_state(leader_state* state) {
     state->leader_active = 0;
     state->last_button = -1;
     state->leader_press_time.tv_sec = 0;
     state->leader_press_time.tv_usec = 0;
-    state->toggle_state = 0; // Also reset toggle state
+    // Don't reset toggle_state here - it's managed separately
 }
 
 // Send leader combination
@@ -293,10 +294,15 @@ void send_leader_combination(leader_state* state, char* combination, int debug) 
     snprintf(cmd, sizeof(cmd), "xdotool key %s", combination);
     system(cmd);
     
-    // Reset leader state after sending (except for sticky mode)
-    if (state->mode != LEADER_MODE_STICKY) {
+    // Reset leader state after sending (except for sticky and toggle modes)
+    if (state->mode == LEADER_MODE_ONE_SHOT) {
         reset_leader_state(state);
+        state->toggle_state = 0; // Also reset toggle for one_shot
+    } else if (state->mode == LEADER_MODE_STICKY) {
+        // Update timer for sticky mode
+        gettimeofday(&state->leader_press_time, NULL);
     }
+    // For toggle mode, don't reset anything - stay active
 }
 
 // Process leader key combinations
@@ -305,7 +311,7 @@ void process_leader_combination(leader_state* state, event* events, int button_i
         return;
     }
     
-    // Check if this is the wheel button (button 18) - should not be modified
+    // Check if this is the wheel button (button 18) - handle specially
     if (button_index == 18) {
         // Wheel button - handle normally without leader
         if (events[button_index].function != NULL && 
@@ -313,7 +319,10 @@ void process_leader_combination(leader_state* state, event* events, int button_i
             // Handle swap function
             // (This would need wheel state tracking - implemented elsewhere)
         }
-        reset_leader_state(state);
+        // Don't reset leader state for wheel button in toggle mode
+        if (state->mode != LEADER_MODE_TOGGLE) {
+            reset_leader_state(state);
+        }
         return;
     }
     
@@ -342,6 +351,7 @@ void process_leader_combination(leader_state* state, event* events, int button_i
                 // Disable toggle mode
                 state->toggle_state = 0;
                 state->leader_active = 0;
+                reset_leader_state(state);
                 
                 if (debug == 1) {
                     printf("Leader toggle mode DISABLED by button %d\n", button_index);
@@ -369,8 +379,13 @@ void process_leader_combination(leader_state* state, event* events, int button_i
         return;
     }
     
-    // Check if we're in leader mode
-    if (state->leader_active) {
+    // Check if we're in leader mode (either active or toggle mode is on)
+    int in_leader_mode = state->leader_active;
+    if (state->mode == LEADER_MODE_TOGGLE) {
+        in_leader_mode = state->toggle_state;
+    }
+    
+    if (in_leader_mode) {
         // Check eligibility first
         if (events[button_index].leader_eligible == 0) {
             // Button is not eligible for leader modifications
@@ -379,7 +394,7 @@ void process_leader_combination(leader_state* state, event* events, int button_i
             }
             
             // For sticky mode, we might want to keep leader active
-            if (state->mode != LEADER_MODE_STICKY) {
+            if (state->mode != LEADER_MODE_STICKY && state->mode != LEADER_MODE_TOGGLE) {
                 reset_leader_state(state);
             }
             
@@ -391,12 +406,14 @@ void process_leader_combination(leader_state* state, event* events, int button_i
             gettimeofday(&now, NULL);
             long elapsed = time_diff_ms(state->leader_press_time, now);
             
+            // Check timeout (skip for toggle mode)
             if (elapsed > state->timeout_ms && state->mode != LEADER_MODE_TOGGLE) {
                 // Leader timeout - reset (except for toggle mode)
                 if (debug == 1) {
                     printf("Leader timeout (%ld ms > %d ms)\n", elapsed, state->timeout_ms);
                 }
                 reset_leader_state(state);
+                state->toggle_state = 0;
                 // Fall through to normal button handling
             } else {
                 // We have a leader combination!
@@ -416,11 +433,6 @@ void process_leader_combination(leader_state* state, event* events, int button_i
                 // For sticky mode, update the timer to extend timeout
                 if (state->mode == LEADER_MODE_STICKY) {
                     gettimeofday(&state->leader_press_time, NULL);
-                }
-                
-                // For one-shot mode, reset after sending
-                if (state->mode == LEADER_MODE_ONE_SHOT) {
-                    reset_leader_state(state);
                 }
                 
                 return; // Don't also handle as normal button
@@ -1252,7 +1264,9 @@ void GetDevice(libusb_context *ctx, int debug, int accept, int dry){
 						}
 						printf("]\n");
 						
-						if (leader.leader_active) {
+						if (leader.toggle_state) {
+							printf("Leader toggle: ON (mode: %s)\n", leader_mode_to_string(leader.mode));
+						} else if (leader.leader_active) {
 							struct timeval now;
 							gettimeofday(&now, NULL);
 							long elapsed = time_diff_ms(leader.leader_press_time, now);
