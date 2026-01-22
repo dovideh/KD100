@@ -88,7 +88,7 @@ void crash_handler(int sig) {
         fprintf(stderr, "  Runtime address: %p\n", array[i]);
         fprintf(stderr, "  File offset:     %p\n", file_offset);
 
-        char cmd[512];
+        char cmd[1536];
         snprintf(cmd, sizeof(cmd), "addr2line -e '%s' -f -C -p %p 2>&1",
                 exe_path, file_offset);
 
@@ -115,7 +115,7 @@ void crash_handler(int sig) {
     }
 
     fprintf(stderr, "\n=== Using gdb to get line info ===\n");
-    char gdb_cmd[512];
+    char gdb_cmd[1536];
     snprintf(gdb_cmd, sizeof(gdb_cmd),
             "gdb -q '%s' -ex 'info line *%p' -ex 'quit' 2>/dev/null | grep -E \"Line|at\"",
             exe_path, array[3]);
