@@ -1,4 +1,5 @@
 # Huion KD100 Linux Driver
+Originally forked from [mckset/KD100](https://github.com/mckset/KD100), now independently maintained with major enhancements.
 A simple driver for the Huion KD100 mini Keydial written in C to give the device some usability while waiting for Huion to fix their Linux drivers. Each button can be configured to either act as a key/multiple keys or to execute a program/command.
 
 **Version 1.5.1** adds configurable wheel toggle modes with multi-click detection for advanced workflow organization.
