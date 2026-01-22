@@ -339,88 +339,104 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                                         prevEvent.function = "";
                                     }
                                 } else if (strcmp(config->events[button_index].function, "swap") == 0) {
-                                    // Multi-click detection for button 18
-                                    struct timeval now;
-                                    gettimeofday(&now, NULL);
-
-                                    long time_since_last_click = 0;
-                                    if (last_button18_time.tv_sec != 0 || last_button18_time.tv_usec != 0) {
-                                        time_since_last_click =
-                                            (now.tv_sec - last_button18_time.tv_sec) * 1000 +
-                                            (now.tv_usec - last_button18_time.tv_usec) / 1000;
-                                    }
-
-                                    // If click is within timeout window, increment count
-                                    if (time_since_last_click > 0 && time_since_last_click < config->wheel_click_timeout_ms) {
-                                        button18_click_count++;
-                                    } else {
-                                        // This is a new click sequence
-                                        button18_click_count = 1;
-                                    }
-
-                                    last_button18_time = now;
-
-                                    // Wait for timeout to process the click(s)
-                                    usleep(config->wheel_click_timeout_ms * 1000);
-
-                                    // Check if more clicks arrived during the wait
-                                    gettimeofday(&now, NULL);
-                                    time_since_last_click =
-                                        (now.tv_sec - last_button18_time.tv_sec) * 1000 +
-                                        (now.tv_usec - last_button18_time.tv_usec) / 1000;
-
-                                    // Only process if no more clicks arrived
-                                    if (time_since_last_click >= config->wheel_click_timeout_ms) {
-                                        int final_click_count = button18_click_count;
-                                        button18_click_count = 0;
-
-                                        if (debug == 1) {
-                                            printf("Button 18 clicks: %d\n", final_click_count);
-                                        }
-
-                                        // Process based on click count
-                                        if (final_click_count == 1) {
-                                            // Single-click: toggle within current set
-                                            wheel_position_in_set = 1 - wheel_position_in_set;
-                                        } else if (final_click_count == 2) {
-                                            // Double-click: toggle between Set 0 and Set 1
-                                            if (wheel_current_set == 0) {
-                                                wheel_current_set = 1;
-                                            } else if (wheel_current_set == 1) {
-                                                wheel_current_set = 0;
-                                            } else {
-                                                // From Set 2, go to Set 0
-                                                wheel_current_set = 0;
-                                            }
-                                            wheel_position_in_set = 0;  // Start at first function in new set
-                                        } else if (final_click_count >= 3) {
-                                            // Triple-click: toggle to/from Set 2
-                                            if (wheel_current_set == 2) {
-                                                // From Set 2, go back to Set 0
-                                                wheel_current_set = 0;
-                                            } else {
-                                                // From Set 0 or 1, go to Set 2
-                                                wheel_current_set = 2;
-                                            }
-                                            wheel_position_in_set = 0;  // Start at first function in new set
-                                        }
-
-                                        // Calculate actual wheel function index
-                                        wheelFunction = (wheel_current_set * 2) + wheel_position_in_set;
-
-                                        // Ensure we don't go beyond available wheels
-                                        if (wheelFunction >= config->totalWheels) {
+                                    // Check wheel mode
+                                    if (config->wheel_mode == WHEEL_MODE_SEQUENTIAL) {
+                                        // Sequential mode: simple cycling through all functions
+                                        if (wheelFunction != config->totalWheels - 1) {
+                                            wheelFunction++;
+                                        } else {
                                             wheelFunction = 0;
-                                            wheel_current_set = 0;
-                                            wheel_position_in_set = 0;
                                         }
-
                                         if (debug == 1) {
-                                            printf("Set: %d | Position: %d | Wheel Function: %d\n",
-                                                   wheel_current_set, wheel_position_in_set, wheelFunction);
+                                            printf("Sequential mode - Wheel Function: %d\n", wheelFunction);
                                             printf("Function: %s | %s\n",
                                                    config->wheelEvents[wheelFunction].left ? config->wheelEvents[wheelFunction].left : "(null)",
                                                    config->wheelEvents[wheelFunction].right ? config->wheelEvents[wheelFunction].right : "(null)");
+                                        }
+                                    } else {
+                                        // Sets mode: multi-click detection for set-based navigation
+                                        struct timeval now;
+                                        gettimeofday(&now, NULL);
+
+                                        long time_since_last_click = 0;
+                                        if (last_button18_time.tv_sec != 0 || last_button18_time.tv_usec != 0) {
+                                            time_since_last_click =
+                                                (now.tv_sec - last_button18_time.tv_sec) * 1000 +
+                                                (now.tv_usec - last_button18_time.tv_usec) / 1000;
+                                        }
+
+                                        // If click is within timeout window, increment count
+                                        if (time_since_last_click > 0 && time_since_last_click < config->wheel_click_timeout_ms) {
+                                            button18_click_count++;
+                                        } else {
+                                            // This is a new click sequence
+                                            button18_click_count = 1;
+                                        }
+
+                                        last_button18_time = now;
+
+                                        // Wait for timeout to process the click(s)
+                                        usleep(config->wheel_click_timeout_ms * 1000);
+
+                                        // Check if more clicks arrived during the wait
+                                        gettimeofday(&now, NULL);
+                                        time_since_last_click =
+                                            (now.tv_sec - last_button18_time.tv_sec) * 1000 +
+                                            (now.tv_usec - last_button18_time.tv_usec) / 1000;
+
+                                        // Only process if no more clicks arrived
+                                        if (time_since_last_click >= config->wheel_click_timeout_ms) {
+                                            int final_click_count = button18_click_count;
+                                            button18_click_count = 0;
+
+                                            if (debug == 1) {
+                                                printf("Sets mode - Button 18 clicks: %d\n", final_click_count);
+                                            }
+
+                                            // Process based on click count
+                                            if (final_click_count == 1) {
+                                                // Single-click: toggle within current set
+                                                wheel_position_in_set = 1 - wheel_position_in_set;
+                                            } else if (final_click_count == 2) {
+                                                // Double-click: toggle between Set 0 and Set 1
+                                                if (wheel_current_set == 0) {
+                                                    wheel_current_set = 1;
+                                                } else if (wheel_current_set == 1) {
+                                                    wheel_current_set = 0;
+                                                } else {
+                                                    // From Set 2, go to Set 0
+                                                    wheel_current_set = 0;
+                                                }
+                                                wheel_position_in_set = 0;  // Start at first function in new set
+                                            } else if (final_click_count >= 3) {
+                                                // Triple-click: toggle to/from Set 2
+                                                if (wheel_current_set == 2) {
+                                                    // From Set 2, go back to Set 0
+                                                    wheel_current_set = 0;
+                                                } else {
+                                                    // From Set 0 or 1, go to Set 2
+                                                    wheel_current_set = 2;
+                                                }
+                                                wheel_position_in_set = 0;  // Start at first function in new set
+                                            }
+
+                                            // Calculate actual wheel function index
+                                            wheelFunction = (wheel_current_set * 2) + wheel_position_in_set;
+
+                                            // Ensure we don't go beyond available wheels
+                                            if (wheelFunction >= config->totalWheels) {
+                                                wheelFunction = 0;
+                                                wheel_current_set = 0;
+                                                wheel_position_in_set = 0;
+                                            }
+
+                                            if (debug == 1) {
+                                                printf("Set: %d | Position: %d | Wheel Function: %d\n",
+                                                       wheel_current_set, wheel_position_in_set, wheelFunction);
+                                                printf("Function: %s | %s\n",
+                                                       config->wheelEvents[wheelFunction].left ? config->wheelEvents[wheelFunction].left : "(null)",
+                                                       config->wheelEvents[wheelFunction].right ? config->wheelEvents[wheelFunction].right : "(null)");
+                                            }
                                         }
                                     }
                                 } else if (strcmp(config->events[button_index].function, "mouse1") == 0 ||

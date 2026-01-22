@@ -3,6 +3,12 @@
 
 #include "leader.h"
 
+// Wheel mode enumeration
+typedef enum {
+    WHEEL_MODE_SEQUENTIAL,  // Single-click cycles through all functions (default/legacy)
+    WHEEL_MODE_SETS         // Multi-click for set-based navigation
+} wheel_mode_t;
+
 // Wheel event structure
 typedef struct {
     char* right;
@@ -18,6 +24,7 @@ typedef struct {
     leader_state leader;
     int enable_uclogic;
     int wheel_click_timeout_ms;  // Multi-click detection timeout (20-990ms)
+    wheel_mode_t wheel_mode;     // Wheel toggle mode (sequential or sets)
 } config_t;
 
 // Configuration functions
