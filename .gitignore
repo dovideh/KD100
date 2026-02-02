@@ -1,0 +1,25 @@
+# Compiled binaries
+KD100
+KD100-debug
+KD100-release
+KD100-asan
+KD100-ubsan
+
+# Object files
+*.o
+
+# Log files
+*.log
+
+# Core dumps
+core
+core.*
+
+# Editor backup files
+*~
+*.swp
+*.swo
+
+# IDE directories
+.vscode/
+.idea/
