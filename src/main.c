@@ -1,12 +1,16 @@
 /*
-	V1.5.0 - Modular Architecture
+	V1.6.0 - OSD & Profile System
 	https://github.com/mckset/KD100.git
 	KD100 Linux driver for X11 desktops
 	Features:
+	- On-screen display (OSD) for key actions
+	- Profile system with window title matching
+	- Collapsible OSD (minimal/expanded modes)
+	- Draggable OSD overlay
+	- Wildcard pattern matching for profiles
 	- Modular code structure for better maintainability
 	- Configurable leader modes (one_shot, sticky, toggle)
 	- Per-button leader eligibility
-	- Fixed timing system
 */
 
 #include <libusb-1.0/libusb.h>
@@ -165,26 +169,23 @@ int main(int args, char *in[]) {
             printf("\t-d [-d]\t\tEnable debug outputs (use twice to view data sent by the device)\n");
             printf("\t-dry \t\tDisplay data sent by the device without sending events\n");
             printf("\t-h\t\tDisplays this message\n");
-            printf("\nNew in v1.5.0 - MODULAR ARCHITECTURE:\n");
-            printf("\t• Separated code into focused modules for better maintainability\n");
-            printf("\t• Improved code organization and testability\n");
-            printf("\t• Retained all v1.4.9 features:\n");
-            printf("\t  - Configurable leader modes (one_shot, sticky, toggle)\n");
-            printf("\t  - Per-button eligibility control\n");
-            printf("\t  - Enhanced timing system\n");
-            printf("\t• Example config in default.cfg:\n");
-            printf("\t  leader_button: 16\n");
-            printf("\t  leader_function: shift\n");
-            printf("\t  leader_timeout: 1000\n");
-            printf("\t  leader_mode: sticky\n");
-            printf("\t  button 0\n");
-            printf("\t  type: 0\n");
-            printf("\t  function: b\n");
-            printf("\t  leader_eligible: true\n");
-            printf("\t  button 18\n");
-            printf("\t  type: 1\n");
-            printf("\t  function: swap\n");
-            printf("\t  leader_eligible: false\n");
+            printf("\nNew in v1.6.0 - OSD & PROFILE SYSTEM:\n");
+            printf("\t• On-Screen Display (OSD) for key actions\n");
+            printf("\t  - Semi-transparent overlay (configurable opacity)\n");
+            printf("\t  - Collapsible: minimal mode (recent actions) / expanded (full layout)\n");
+            printf("\t  - Draggable by title bar\n");
+            printf("\t  - Shows what each key does in expanded mode\n");
+            printf("\t• Profile System with window title matching\n");
+            printf("\t  - Automatic profile switching based on active window\n");
+            printf("\t  - Wildcard patterns: krita*, *photoshop*, gimp*\n");
+            printf("\t  - Case-insensitive matching\n");
+            printf("\t  - Per-profile key descriptions\n");
+            printf("\t• Example OSD config in default.cfg:\n");
+            printf("\t  osd_enabled: true\n");
+            printf("\t  osd_opacity: 0.67\n");
+            printf("\t  osd_position: 50,50\n");
+            printf("\t  profiles_file: profiles.cfg\n");
+            printf("\t  profile_auto_switch: true\n");
             printf("\nConfiguration:\n");
             printf("\tAdd 'enable_uclogic: true' to config to work with hid_uclogic loaded\n");
             printf("\tDefault: enable_uclogic: false (compatible with OpenTabletDriver)\n\n");
@@ -256,8 +257,8 @@ int main(int args, char *in[]) {
         }
     }
 
-    printf("\nKD100 Driver v1.5.0 - Modular Architecture\n");
-    printf("Features: Configurable modes | Per-button eligibility | Modular design\n\n");
+    printf("\nKD100 Driver v1.6.0 - OSD & Profile System\n");
+    printf("Features: OSD overlay | Profile switching | Configurable modes\n\n");
 
     // Run device handler
     device_run(ctx, config, debug, accept, dry);
