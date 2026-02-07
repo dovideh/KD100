@@ -291,13 +291,28 @@ void osd_set_mode(osd_state_t* osd, osd_mode_t mode) {
         return;
     }
 
-    // Update window size based on mode
+    // Calculate scale factor based on font size (13 is the default/base)
+    float scale = osd->font_size / 13.0f;
+    int padding = (int)(10 * scale);
+    int line_height = osd->font_size + (int)(3 * scale);
+    int title_height = osd->font_size + (int)(12 * scale);
+
+    // Update window size based on mode (dynamically calculated from font size)
     if (mode == OSD_MODE_MINIMAL) {
-        osd->width = osd->min_width;
-        osd->height = osd->min_height;
+        // Minimal: title + "Recent Actions:" + 3 action lines + padding
+        osd->width = (int)(200 * scale);
+        osd->height = title_height + padding + line_height + (int)(5 * scale) + (3 * line_height) + padding;
     } else {
-        osd->width = osd->expanded_width;
-        osd->height = osd->expanded_height;
+        // Expanded: calculate based on grid dimensions
+        int key_width = (int)(85 * scale);
+        int key_height = (int)(45 * scale);
+        int grid_padding = (int)(5 * scale);
+        int grid_width = 4 * key_width + 3 * grid_padding;
+        // Height: title + "Keyboard Layout:" + wheel + 4 rows + bottom row + padding
+        int wheel_height = key_height - (int)(10 * scale);
+        int grid_height = wheel_height + 5 * (key_height + grid_padding) + grid_padding;
+        osd->width = grid_width + 2 * padding;
+        osd->height = title_height + padding + line_height + (int)(10 * scale) + grid_height + padding;
     }
 
     XResizeWindow(dpy, win, osd->width, osd->height);
@@ -348,6 +363,12 @@ void osd_redraw(osd_state_t* osd) {
     // Calculate alpha value (0-255)
     unsigned char alpha = (unsigned char)(osd->opacity * 255);
 
+    // Scale factor based on font size (13 is the default/base)
+    float scale = osd->font_size / 13.0f;
+    int padding = (int)(10 * scale);
+    int line_height = osd->font_size + (int)(3 * scale);
+    int title_height = osd->font_size + (int)(12 * scale);
+
     // Create colors with alpha
     unsigned long bg_color = ((unsigned long)alpha << 24) | 0x202020;  // Dark gray with alpha
     unsigned long fg_color = ((unsigned long)255 << 24) | 0xFFFFFF;   // White, full alpha
@@ -368,9 +389,6 @@ void osd_redraw(osd_state_t* osd) {
         XSetFont(dpy, gc, font->fid);
     }
 
-    int line_height = osd->font_size + 3;
-    int padding = 10;
-    int title_height = osd->font_size + 12;
     int y_offset = padding + line_height;
 
     // Draw title bar with mode indicator
@@ -379,7 +397,7 @@ void osd_redraw(osd_state_t* osd) {
 
     XSetForeground(dpy, gc, fg_color);
     const char* title = (osd->mode == OSD_MODE_MINIMAL) ? "KD100 [+] click to expand" : "KD100 [-] click to collapse";
-    XDrawString(dpy, win, gc, padding, title_height - 5, title, strlen(title));
+    XDrawString(dpy, win, gc, padding, title_height - (int)(5 * scale), title, strlen(title));
 
     y_offset = title_height + padding;
 
@@ -387,7 +405,7 @@ void osd_redraw(osd_state_t* osd) {
         // Minimal mode: show recent actions
         XSetForeground(dpy, gc, fg_color);
         XDrawString(dpy, win, gc, padding, y_offset, "Recent Actions:", 15);
-        y_offset += line_height + 5;
+        y_offset += line_height + (int)(5 * scale);
 
         long now = osd_get_time_ms();
         int shown = 0;
@@ -432,28 +450,32 @@ void osd_redraw(osd_state_t* osd) {
         // Expanded mode: show full keyboard layout
         XSetForeground(dpy, gc, fg_color);
         XDrawString(dpy, win, gc, padding, y_offset, "Keyboard Layout:", 16);
-        y_offset += line_height + 10;
+        y_offset += line_height + (int)(10 * scale);
 
-        // Draw keyboard grid
-        int key_width = 85;
-        int key_height = 45;
-        int grid_padding = 5;
+        // Draw keyboard grid (scaled)
+        int key_width = (int)(85 * scale);
+        int key_height = (int)(45 * scale);
+        int grid_padding = (int)(5 * scale);
+        int text_offset_x = (int)(5 * scale);
+        int text_offset_y1 = (int)(15 * scale);
+        int text_offset_y2 = (int)(35 * scale);
         int start_x = padding;
         int start_y = y_offset;
 
         // Calculate grid width (4 columns)
         int grid_width = 4 * key_width + 3 * grid_padding;
+        int wheel_height = key_height - (int)(10 * scale);
 
         // Draw wheel button (top, spanning same width as grid)
         int wheel_y = start_y;
         XSetForeground(dpy, gc, highlight_color);
-        XFillRectangle(dpy, win, gc, start_x, wheel_y, grid_width, key_height - 10);
+        XFillRectangle(dpy, win, gc, start_x, wheel_y, grid_width, wheel_height);
         XSetForeground(dpy, gc, fg_color);
-        XDrawRectangle(dpy, win, gc, start_x, wheel_y, grid_width - 1, key_height - 11);
+        XDrawRectangle(dpy, win, gc, start_x, wheel_y, grid_width - 1, wheel_height - 1);
 
         // Wheel button label
         const char* wheel_desc = osd->key_descriptions[18] ? osd->key_descriptions[18] : "Wheel Toggle";
-        XDrawString(dpy, win, gc, start_x + 5, wheel_y + 22, wheel_desc, strlen(wheel_desc));
+        XDrawString(dpy, win, gc, start_x + text_offset_x, wheel_y + (int)(22 * scale), wheel_desc, strlen(wheel_desc));
 
         start_y += key_height;
 
@@ -478,7 +500,7 @@ void osd_redraw(osd_state_t* osd) {
                 // Draw button number
                 char num[16];
                 snprintf(num, sizeof(num), "%d", btn);
-                XDrawString(dpy, win, gc, x + 5, y + 15, num, strlen(num));
+                XDrawString(dpy, win, gc, x + text_offset_x, y + text_offset_y1, num, strlen(num));
 
                 // Draw description or function
                 const char* desc = NULL;
@@ -500,7 +522,7 @@ void osd_redraw(osd_state_t* osd) {
                         desc = truncated;
                     }
                     XSetForeground(dpy, gc, accent_color);
-                    XDrawString(dpy, win, gc, x + 5, y + 35, desc, strlen(desc));
+                    XDrawString(dpy, win, gc, x + text_offset_x, y + text_offset_y2, desc, strlen(desc));
                 }
             }
         }
@@ -516,10 +538,10 @@ void osd_redraw(osd_state_t* osd) {
         XFillRectangle(dpy, win, gc, btn15_x, btn15_y, key_width, btn15_height);
         XSetForeground(dpy, gc, fg_color);
         XDrawRectangle(dpy, win, gc, btn15_x, btn15_y, key_width - 1, btn15_height - 1);
-        XDrawString(dpy, win, gc, btn15_x + 5, btn15_y + 15, "15", 2);
+        XDrawString(dpy, win, gc, btn15_x + text_offset_x, btn15_y + text_offset_y1, "15", 2);
         if (osd->key_descriptions[15]) {
             XSetForeground(dpy, gc, accent_color);
-            XDrawString(dpy, win, gc, btn15_x + 5, btn15_y + 35, osd->key_descriptions[15],
+            XDrawString(dpy, win, gc, btn15_x + text_offset_x, btn15_y + text_offset_y2, osd->key_descriptions[15],
                         strlen(osd->key_descriptions[15]) > 10 ? 10 : strlen(osd->key_descriptions[15]));
         }
 
@@ -528,10 +550,10 @@ void osd_redraw(osd_state_t* osd) {
         XFillRectangle(dpy, win, gc, start_x, bottom_y, key_width * 2 + grid_padding, key_height);
         XSetForeground(dpy, gc, fg_color);
         XDrawRectangle(dpy, win, gc, start_x, bottom_y, key_width * 2 + grid_padding - 1, key_height - 1);
-        XDrawString(dpy, win, gc, start_x + 5, bottom_y + 15, "16", 2);
+        XDrawString(dpy, win, gc, start_x + text_offset_x, bottom_y + text_offset_y1, "16", 2);
         if (osd->key_descriptions[16]) {
             XSetForeground(dpy, gc, accent_color);
-            XDrawString(dpy, win, gc, start_x + 5, bottom_y + 35, osd->key_descriptions[16],
+            XDrawString(dpy, win, gc, start_x + text_offset_x, bottom_y + text_offset_y2, osd->key_descriptions[16],
                         strlen(osd->key_descriptions[16]) > 15 ? 15 : strlen(osd->key_descriptions[16]));
         }
 
@@ -541,10 +563,10 @@ void osd_redraw(osd_state_t* osd) {
         XFillRectangle(dpy, win, gc, x17, bottom_y, key_width, key_height);
         XSetForeground(dpy, gc, fg_color);
         XDrawRectangle(dpy, win, gc, x17, bottom_y, key_width - 1, key_height - 1);
-        XDrawString(dpy, win, gc, x17 + 5, bottom_y + 15, "17", 2);
+        XDrawString(dpy, win, gc, x17 + text_offset_x, bottom_y + text_offset_y1, "17", 2);
         if (osd->key_descriptions[17]) {
             XSetForeground(dpy, gc, accent_color);
-            XDrawString(dpy, win, gc, x17 + 5, bottom_y + 35, osd->key_descriptions[17],
+            XDrawString(dpy, win, gc, x17 + text_offset_x, bottom_y + text_offset_y2, osd->key_descriptions[17],
                         strlen(osd->key_descriptions[17]) > 10 ? 10 : strlen(osd->key_descriptions[17]));
         }
     }
@@ -588,7 +610,8 @@ void osd_update(osd_state_t* osd) {
                             // If barely moved and clicked in title bar, toggle mode
                             int dx = event.xbutton.x_root - osd->pos_x - osd->drag_start_x;
                             int dy = event.xbutton.y_root - osd->pos_y - osd->drag_start_y;
-                            int title_height = osd->font_size + 12;
+                            float scale = osd->font_size / 13.0f;
+                            int title_height = osd->font_size + (int)(12 * scale);
                             if (abs(dx) < 5 && abs(dy) < 5 && event.xbutton.y < title_height) {
                                 osd_toggle_mode(osd);
                             }
