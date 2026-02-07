@@ -79,7 +79,7 @@ osd_state_t* osd_create(config_t* config) {
     osd->min_width = 200;
     osd->min_height = 100;
     osd->expanded_width = 400;
-    osd->expanded_height = 350;
+    osd->expanded_height = 380;
     osd->width = osd->min_width;
     osd->height = osd->min_height;
     osd->opacity = 0.67f;  // 33% transparent = 67% opaque
@@ -449,10 +449,11 @@ void osd_redraw(osd_state_t* osd) {
         start_y += key_height;
 
         // Draw main button grid (4 rows x 4 columns)
+        // Note: Button 15 is drawn separately with extended height
         for (int row = 1; row < 5; row++) {
             for (int col = 0; col < 4; col++) {
                 int btn = BUTTON_LAYOUT[row][col];
-                if (btn < 0) continue;
+                if (btn < 0 || btn == 15) continue;  // Skip button 15, drawn separately
 
                 int x = start_x + col * (key_width + grid_padding);
                 int y = start_y + (row - 1) * (key_height + grid_padding);
@@ -495,8 +496,23 @@ void osd_redraw(osd_state_t* osd) {
             }
         }
 
-        // Draw bottom row (buttons 16 and 17 have special layout)
+        // Draw bottom row (buttons 15, 16, and 17 have special layout)
         int bottom_y = start_y + 4 * (key_height + grid_padding);
+
+        // Button 15 (tall - extends from row 4 down to bottom row)
+        int btn15_x = start_x + 3 * (key_width + grid_padding);
+        int btn15_y = start_y + 3 * (key_height + grid_padding);
+        int btn15_height = 2 * key_height + grid_padding;
+        XSetForeground(dpy, gc, highlight_color);
+        XFillRectangle(dpy, win, gc, btn15_x, btn15_y, key_width, btn15_height);
+        XSetForeground(dpy, gc, fg_color);
+        XDrawRectangle(dpy, win, gc, btn15_x, btn15_y, key_width - 1, btn15_height - 1);
+        XDrawString(dpy, win, gc, btn15_x + 5, btn15_y + 15, "15", 2);
+        if (osd->key_descriptions[15]) {
+            XSetForeground(dpy, gc, accent_color);
+            XDrawString(dpy, win, gc, btn15_x + 5, btn15_y + 35, osd->key_descriptions[15],
+                        strlen(osd->key_descriptions[15]) > 10 ? 10 : strlen(osd->key_descriptions[15]));
+        }
 
         // Button 16 (wide)
         XSetForeground(dpy, gc, highlight_color);

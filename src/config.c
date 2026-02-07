@@ -98,7 +98,7 @@ config_t* config_create(void) {
     config->osd.min_width = 200;
     config->osd.min_height = 100;
     config->osd.expanded_width = 400;
-    config->osd.expanded_height = 350;
+    config->osd.expanded_height = 380;
     config->osd.osd_toggle_button = -1;  // Disabled by default
     config->osd.font_size = 13;  // Default font size
 
