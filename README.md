@@ -1,17 +1,22 @@
 # Huion KD100 Linux Driver
 Originally forked from [mckset/KD100](https://github.com/mckset/KD100), now independently maintained with major enhancements.
 
+
+![KD100-OSD](OSD-full.png)
 A simple driver for the Huion KD100 mini Keydial written in C to give the device some usability while waiting for Huion to fix their Linux drivers. Each button can be configured to either act as a key/multiple keys or to execute a program/command.
 
-**Version 1.5.1** adds configurable wheel toggle modes with multi-click detection for advanced workflow organization.
+**Version 1.6.0** adds an on-screen display (OSD) overlay showing key actions and keyboard layout, with profile support for automatic configuration switching based on active window.
 
 > **NOTICE:** When updating from **v1.31** or below, make sure you updated your config file to follow the new format shown in the default config file.
 
 ## Features
+- **On-Screen Display (v1.6.0)**: Semi-transparent overlay showing recent key actions and full keyboard layout
+- **Profile System (v1.6.0)**: Automatic configuration switching based on active window title
+- **Scalable UI (v1.6.0)**: Font size setting scales entire OSD proportionally
 - **Configurable Wheel Toggle Modes (v1.5.1)**: Choose between sequential or set-based navigation
 - **Multi-Click Detection (v1.5.1)**: Single, double, and triple-click support for wheel button
 - **Set-Based Navigation (v1.5.1)**: Organize up to 6 wheel functions into 3 sets of 2
-- **Modular Architecture (v1.5.0)**: Clean separation into 7 focused modules for easy maintenance
+- **Modular Architecture (v1.5.0)**: Clean separation into focused modules for easy maintenance
 - **Enhanced Leader Key System**: Three configurable modes (one_shot, sticky, toggle)
 - **Per-button Leader Eligibility**: Control which buttons can be modified by leader
 - **hid_uclogic Compatibility**: Work with or without the hid_uclogic kernel module
@@ -20,7 +25,7 @@ A simple driver for the Huion KD100 mini Keydial written in C to give the device
 - **Clean Compilation**: Zero warnings with strict compiler flags
 - **Better Code Organization**: Easy to extend and maintain
 
-## Architecture (v1.5.0)
+## Architecture (v1.6.0)
 
 The codebase is organized into focused modules:
 
@@ -32,7 +37,10 @@ src/
 ├── leader.c/h   - Leader key system implementation
 ├── handler.c/h  - Event handling and key execution
 ├── utils.c/h    - Utility functions (time, string, parsing)
-└── compat.c/h   - Hardware compatibility layer
+├── compat.c/h   - Hardware compatibility layer
+├── osd.c/h      - On-screen display overlay (v1.6.0)
+├── window.c/h   - Active window tracking (v1.6.0)
+└── profiles.c/h - Profile management system (v1.6.0)
 ```
 
 Each module has a single, clear responsibility, making the code easier to understand, test, and extend.
@@ -40,15 +48,15 @@ Each module has a single, clear responsibility, making the code easier to unders
 ## Pre-Installation
 **Arch Linux/Manjaro:**
 ```bash
-sudo pacman -S libusb xdotool
+sudo pacman -S libusb xdotool libx11 libxrender libxext
 ```
 
 **Ubuntu/Debian/Pop OS:**
 ```bash
-sudo apt-get install libusb-1.0-0-dev xdotool
+sudo apt-get install libusb-1.0-0-dev xdotool libx11-dev libxrender-dev libxext-dev
 ```
 
-> **NOTE:** Some distros label libusb as "libusb-1.0-0" and others might require the separate "libusb-1.0-dev" package.
+> **NOTE:** Some distros label libusb as "libusb-1.0-0" and others might require the separate "libusb-1.0-dev" package. The X11 libraries are required for the OSD overlay feature.
 
 ## Installation
 You can either download the latest release or run the following:
@@ -151,6 +159,103 @@ Button 18                  # Wheel toggle button
 type: 1
 function: swap
 leader_eligible: false    # Typically not eligible
+```
+
+## On-Screen Display (OSD)
+
+### Overview
+Version 1.6.0 introduces a semi-transparent on-screen display overlay, similar to Blender's screencast keys feature. The OSD shows recent key actions and can expand to show the full keyboard layout.
+
+### Features
+- **Minimal Mode**: Shows recent key actions (e.g., "B0 - Brush (b)")
+- **Expanded Mode**: Shows full keyboard layout with key descriptions
+- **Auto-Show/Hide**: Appears when keys are pressed, hides after timeout
+- **Hover Detection**: Stays visible while cursor hovers over it
+- **Draggable**: Click and drag anywhere on the window to move it
+- **Scalable UI**: Font size setting scales entire interface proportionally
+- **Profile Support**: Automatic key descriptions based on active window
+
+### Configuration
+```bash
+# Enable/disable OSD
+osd_enabled: true
+
+# Show OSD on startup (or wait for key press)
+osd_start_visible: false
+
+# Auto-show when keys are pressed (recommended with start_visible: false)
+osd_auto_show: true
+
+# Initial position on screen
+osd_position: 50,50
+
+# Background opacity (0.0 = transparent, 1.0 = opaque)
+osd_opacity: 0.67
+
+# How long OSD stays visible after last action (milliseconds)
+osd_display_duration: 3000
+
+# Font size (8-32) - scales entire UI proportionally
+osd_font_size: 13
+
+# Button to toggle OSD visibility (-1 = disabled)
+osd_toggle_button: -1
+```
+
+### Modes
+- **Click title bar** to toggle between minimal and expanded modes
+- **Drag anywhere** on the window to reposition
+- **Hover** over the window to prevent auto-hide
+
+### Scaling
+The `osd_font_size` setting acts as a scaling factor:
+- `osd_font_size: 13` - Default size (scale = 1.0)
+- `osd_font_size: 26` - Double size (scale = 2.0)
+- All UI elements (padding, buttons, text) scale proportionally
+
+## Profile System
+
+### Overview
+Version 1.6.0 adds automatic profile switching based on the active window title. Different applications can have different key descriptions shown in the OSD.
+
+### Configuration
+Create a `profiles.cfg` file in your config directory:
+
+```bash
+# profiles.cfg - Window-based profile configuration
+
+# Profile for Krita
+[krita*]
+key_desc_0: Brush
+key_desc_1: Eraser
+key_desc_2: Move Tool
+key_desc_3: Transform
+
+# Profile for GIMP
+[*gimp*]
+key_desc_0: Paintbrush
+key_desc_1: Eraser
+key_desc_2: Move
+key_desc_3: Scale
+
+# Default profile (matches all windows)
+[*]
+key_desc_0: Key 0
+key_desc_1: Key 1
+```
+
+### Pattern Matching
+- `krita*` - Matches windows starting with "krita"
+- `*gimp*` - Matches windows containing "gimp"
+- `*` - Matches all windows (default profile)
+- Patterns are case-insensitive
+
+### Enabling Profiles
+```bash
+# In your main config file
+profiles_file: profiles.cfg
+profile_auto_switch: true
+profile_check_interval: 500  # Check every 500ms
 ```
 
 ## Wheel Toggle Modes
@@ -343,7 +448,26 @@ If you encounter permission errors or device conflicts:
 
 ## Version History
 
-### v1.5.1 (Current) - Wheel Toggle Modes
+### v1.6.0 (Current) - On-Screen Display & Profiles
+- **On-Screen Display**: Semi-transparent overlay showing key actions
+  - Minimal mode: Recent actions with key descriptions
+  - Expanded mode: Full keyboard layout view
+  - Auto-show on key press, auto-hide after timeout
+  - Hover detection prevents unwanted hiding
+  - Draggable window positioning
+- **Profile System**: Automatic configuration per application
+  - Window title pattern matching (wildcards supported)
+  - Per-profile key descriptions
+  - Automatic switching based on active window
+- **Scalable UI**: Font size scales entire interface proportionally
+- **New Modules**: osd.c/h, window.c/h, profiles.c/h
+- **Configuration Options**:
+  - `osd_enabled`, `osd_start_visible`, `osd_auto_show`
+  - `osd_position`, `osd_opacity`, `osd_display_duration`
+  - `osd_font_size` (8-32, scales UI proportionally)
+  - `profiles_file`, `profile_auto_switch`, `profile_check_interval`
+
+### v1.5.1 - Wheel Toggle Modes
 - **Configurable Wheel Modes**: Choose between sequential or set-based navigation
 - **Multi-Click Detection**: Single, double, and triple-click support for button 18
 - **Set-Based Navigation**: Organize up to 6 wheel functions into 3 sets of 2

@@ -26,6 +26,25 @@ static wheel_mode_t parse_wheel_mode(const char* mode_str) {
     return WHEEL_MODE_SEQUENTIAL;
 }
 
+// Helper function to strip inline comments (// ...) and trailing whitespace
+static char* strip_inline_comment(char* str) {
+    if (str == NULL) return NULL;
+
+    // Find // and terminate string there
+    char* comment = strstr(str, "//");
+    if (comment != NULL) {
+        *comment = '\0';
+    }
+
+    // Strip trailing whitespace
+    size_t len = strlen(str);
+    while (len > 0 && (str[len-1] == ' ' || str[len-1] == '\t' || str[len-1] == '\n' || str[len-1] == '\r')) {
+        str[--len] = '\0';
+    }
+
+    return str;
+}
+
 // Create a new configuration structure
 config_t* config_create(void) {
     config_t* config = malloc(sizeof(config_t));
@@ -68,6 +87,31 @@ config_t* config_create(void) {
     config->wheelEvents[0].right = NULL;
     config->wheelEvents[0].left = NULL;
 
+    // Initialize OSD settings
+    config->osd.enabled = 0;
+    config->osd.start_visible = 0;
+    config->osd.auto_show = 1;  // Auto-show on key press by default
+    config->osd.pos_x = 50;
+    config->osd.pos_y = 50;
+    config->osd.opacity = 0.67f;  // 33% transparent = 67% opaque
+    config->osd.display_duration_ms = 3000;
+    config->osd.min_width = 200;
+    config->osd.min_height = 100;
+    config->osd.expanded_width = 375;
+    config->osd.expanded_height = 380;
+    config->osd.osd_toggle_button = -1;  // Disabled by default
+    config->osd.font_size = 13;  // Default font size
+
+    // Initialize profile settings
+    config->profile.profiles_file = NULL;
+    config->profile.auto_switch = 1;  // Enabled by default
+    config->profile.check_interval_ms = 500;
+
+    // Initialize key descriptions
+    for (int i = 0; i < 19; i++) {
+        config->key_descriptions[i] = NULL;
+    }
+
     return config;
 }
 
@@ -97,6 +141,18 @@ void config_destroy(config_t* config) {
     // Free leader function
     if (config->leader.leader_function != NULL) {
         free(config->leader.leader_function);
+    }
+
+    // Free profile settings
+    if (config->profile.profiles_file != NULL) {
+        free(config->profile.profiles_file);
+    }
+
+    // Free key descriptions
+    for (int i = 0; i < 19; i++) {
+        if (config->key_descriptions[i] != NULL) {
+            free(config->key_descriptions[i]);
+        }
     }
 
     free(config);
@@ -222,6 +278,139 @@ int config_load(config_t* config, const char* filename, int debug) {
             continue;
         }
 
+        // Parse OSD settings
+        if (strncasecmp(line, "osd_enabled:", 12) == 0) {
+            char* value = line + 12;
+            while (*value == ' ') value++;
+            config->osd.enabled = (strncasecmp(value, "true", 4) == 0 || strcmp(value, "1") == 0);
+            if (debug) printf("Config: osd_enabled = %s\n", config->osd.enabled ? "true" : "false");
+            continue;
+        }
+
+        if (strncasecmp(line, "osd_start_visible:", 18) == 0) {
+            char* value = line + 18;
+            while (*value == ' ') value++;
+            config->osd.start_visible = (strncasecmp(value, "true", 4) == 0 || strcmp(value, "1") == 0);
+            if (debug) printf("Config: osd_start_visible = %s\n", config->osd.start_visible ? "true" : "false");
+            continue;
+        }
+
+        if (strncasecmp(line, "osd_auto_show:", 14) == 0) {
+            char* value = line + 14;
+            while (*value == ' ') value++;
+            config->osd.auto_show = (strncasecmp(value, "true", 4) == 0 || strcmp(value, "1") == 0);
+            if (debug) printf("Config: osd_auto_show = %s\n", config->osd.auto_show ? "true" : "false");
+            continue;
+        }
+
+        if (strncasecmp(line, "osd_position:", 13) == 0) {
+            char* value = line + 13;
+            while (*value == ' ') value++;
+            if (sscanf(value, "%d,%d", &config->osd.pos_x, &config->osd.pos_y) == 2) {
+                if (debug) printf("Config: osd_position = %d,%d\n", config->osd.pos_x, config->osd.pos_y);
+            }
+            continue;
+        }
+
+        if (strncasecmp(line, "osd_opacity:", 12) == 0) {
+            char* value = line + 12;
+            while (*value == ' ') value++;
+            float opacity = atof(value);
+            if (opacity < 0.0f) opacity = 0.0f;
+            if (opacity > 1.0f) opacity = 1.0f;
+            config->osd.opacity = opacity;
+            if (debug) printf("Config: osd_opacity = %.2f\n", config->osd.opacity);
+            continue;
+        }
+
+        if (strncasecmp(line, "osd_display_duration:", 21) == 0) {
+            char* value = line + 21;
+            while (*value == ' ') value++;
+            config->osd.display_duration_ms = atoi(value);
+            if (debug) printf("Config: osd_display_duration = %d ms\n", config->osd.display_duration_ms);
+            continue;
+        }
+
+        if (strncasecmp(line, "osd_min_size:", 13) == 0) {
+            char* value = line + 13;
+            while (*value == ' ') value++;
+            if (sscanf(value, "%d,%d", &config->osd.min_width, &config->osd.min_height) == 2) {
+                if (debug) printf("Config: osd_min_size = %dx%d\n", config->osd.min_width, config->osd.min_height);
+            }
+            continue;
+        }
+
+        if (strncasecmp(line, "osd_expanded_size:", 18) == 0) {
+            char* value = line + 18;
+            while (*value == ' ') value++;
+            if (sscanf(value, "%d,%d", &config->osd.expanded_width, &config->osd.expanded_height) == 2) {
+                if (debug) printf("Config: osd_expanded_size = %dx%d\n", config->osd.expanded_width, config->osd.expanded_height);
+            }
+            continue;
+        }
+
+        if (strncasecmp(line, "osd_toggle_button:", 18) == 0) {
+            char* value = line + 18;
+            while (*value == ' ') value++;
+            config->osd.osd_toggle_button = atoi(value);
+            if (debug) printf("Config: osd_toggle_button = %d\n", config->osd.osd_toggle_button);
+            continue;
+        }
+
+        if (strncasecmp(line, "osd_font_size:", 14) == 0) {
+            char* value = line + 14;
+            while (*value == ' ') value++;
+            config->osd.font_size = atoi(value);
+            if (config->osd.font_size < 8) config->osd.font_size = 8;
+            if (config->osd.font_size > 32) config->osd.font_size = 32;
+            if (debug) printf("Config: osd_font_size = %d\n", config->osd.font_size);
+            continue;
+        }
+
+        // Parse profile settings
+        if (strncasecmp(line, "profiles_file:", 14) == 0) {
+            char* value = line + 14;
+            while (*value == ' ') value++;
+            if (config->profile.profiles_file) free(config->profile.profiles_file);
+            config->profile.profiles_file = strdup(value);
+            if (debug) printf("Config: profiles_file = %s\n", config->profile.profiles_file);
+            continue;
+        }
+
+        if (strncasecmp(line, "profile_auto_switch:", 20) == 0) {
+            char* value = line + 20;
+            while (*value == ' ') value++;
+            config->profile.auto_switch = (strncasecmp(value, "true", 4) == 0 || strcmp(value, "1") == 0);
+            if (debug) printf("Config: profile_auto_switch = %s\n", config->profile.auto_switch ? "true" : "false");
+            continue;
+        }
+
+        if (strncasecmp(line, "profile_check_interval:", 23) == 0) {
+            char* value = line + 23;
+            while (*value == ' ') value++;
+            config->profile.check_interval_ms = atoi(value);
+            if (debug) printf("Config: profile_check_interval = %d ms\n", config->profile.check_interval_ms);
+            continue;
+        }
+
+        // Parse key descriptions (description_0, description_1, etc.)
+        if (strncasecmp(line, "description_", 12) == 0) {
+            char* num_str = line + 12;
+            char* colon = strchr(num_str, ':');
+            if (colon) {
+                *colon = '\0';
+                int btn = atoi(num_str);
+                if (btn >= 0 && btn <= 18) {
+                    char* value = colon + 1;
+                    while (*value == ' ') value++;
+                    if (config->key_descriptions[btn]) free(config->key_descriptions[btn]);
+                    config->key_descriptions[btn] = strdup(value);
+                    if (debug) printf("Config: description_%d = %s\n", btn, config->key_descriptions[btn]);
+                }
+            }
+            continue;
+        }
+
         // Parse button
         if (strncasecmp(line, "button ", 7) == 0) {
             char* num_str = line + 7;
@@ -274,7 +463,11 @@ int config_load(config_t* config, const char* filename, int debug) {
             char* func_str = line + 9;
             while (*func_str == ' ') func_str++;
 
+            // Strip inline comments and trailing whitespace
             char* func_copy = strdup(func_str);
+            if (func_copy != NULL) {
+                strip_inline_comment(func_copy);
+            }
             if (func_copy == NULL) {
                 printf("Memory allocation failed!\n");
                 fclose(f);
@@ -396,5 +589,34 @@ void config_print(const config_t* config, int debug) {
     printf("\n=== Wheel Click Configuration ===\n");
     printf("Multi-click timeout: %d ms\n", config->wheel_click_timeout_ms);
     printf("Wheel mode: %s\n", wheel_mode_to_string(config->wheel_mode));
+
+    printf("\n=== OSD Configuration ===\n");
+    printf("OSD enabled: %s\n", config->osd.enabled ? "yes" : "no");
+    printf("Start visible: %s\n", config->osd.start_visible ? "yes" : "no");
+    printf("Position: %d, %d\n", config->osd.pos_x, config->osd.pos_y);
+    printf("Opacity: %.2f\n", config->osd.opacity);
+    printf("Display duration: %d ms\n", config->osd.display_duration_ms);
+    printf("Min size: %dx%d\n", config->osd.min_width, config->osd.min_height);
+    printf("Expanded size: %dx%d\n", config->osd.expanded_width, config->osd.expanded_height);
+    printf("Toggle button: %d\n", config->osd.osd_toggle_button);
+    printf("Font size: %d\n", config->osd.font_size);
+
+    printf("\n=== Profile Configuration ===\n");
+    printf("Profiles file: %s\n", config->profile.profiles_file ? config->profile.profiles_file : "(none)");
+    printf("Auto switch: %s\n", config->profile.auto_switch ? "yes" : "no");
+    printf("Check interval: %d ms\n", config->profile.check_interval_ms);
+
+    // Print key descriptions if any are set
+    int has_descriptions = 0;
+    for (int i = 0; i < 19; i++) {
+        if (config->key_descriptions[i]) {
+            if (!has_descriptions) {
+                printf("\n=== Key Descriptions ===\n");
+                has_descriptions = 1;
+            }
+            printf("Button %d: %s\n", i, config->key_descriptions[i]);
+        }
+    }
+
     printf("\n");
 }

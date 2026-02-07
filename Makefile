@@ -1,19 +1,20 @@
 # Compiler and flags
 CC = gcc
-CFLAGS = -Wall -Wextra -Wpedantic -Isrc
-LDFLAGS = -lusb-1.0 -ldl
+CFLAGS = -Wall -Wextra -Wpedantic -Isrc $(shell pkg-config --cflags x11 xrender xext 2>/dev/null)
+LDFLAGS = -lusb-1.0 -ldl $(shell pkg-config --libs x11 xrender xext 2>/dev/null)
 USER = $(shell id -u)
 DIR = $(shell pwd)
 HOME = "/home/"$(shell logname)
 TARGET = KD100
 DEBUG_TARGET = KD100-debug
-VERSION = 1.5.1
+VERSION = 1.6.0
 
 # Source files
 SRC_DIR = src
 SOURCES = $(SRC_DIR)/main.c $(SRC_DIR)/config.c $(SRC_DIR)/device.c \
           $(SRC_DIR)/handler.c $(SRC_DIR)/leader.c $(SRC_DIR)/utils.c \
-          $(SRC_DIR)/compat.c
+          $(SRC_DIR)/compat.c $(SRC_DIR)/osd.c $(SRC_DIR)/window.c \
+          $(SRC_DIR)/profiles.c
 OBJECTS = $(SOURCES:.c=.o)
 
 # Debug flags
@@ -123,6 +124,13 @@ clean:
 	rm -f $(OBJECTS) *.o *.log core core.*
 	@echo "Cleaned build artifacts"
 
+# Check for X11 dependencies
+check-deps:
+	@echo "Checking dependencies..."
+	@pkg-config --exists x11 xrender xext && echo "X11 libraries: OK" || echo "X11 libraries: MISSING (install libx11-dev libxrender-dev libxext-dev)"
+	@which xdotool > /dev/null && echo "xdotool: OK" || echo "xdotool: MISSING (install xdotool)"
+	@pkg-config --exists libusb-1.0 && echo "libusb: OK" || echo "libusb: MISSING (install libusb-1.0-0-dev)"
+
 # Help target
 help:
 	@echo "Available targets:"
@@ -136,13 +144,19 @@ help:
 	@echo "  make analyze      - Analyze core dump (if exists)"
 	@echo "  make asan         - Build with AddressSanitizer"
 	@echo "  make ubsan        - Build with UndefinedBehaviorSanitizer"
+	@echo "  make check-deps   - Check for required dependencies"
 	@echo "  make clean        - Remove all build artifacts"
 	@echo "  make help         - Show this help"
+	@echo ""
+	@echo "New in v$(VERSION):"
+	@echo "  - On-screen display (OSD) for key actions"
+	@echo "  - Profile system with window title matching"
+	@echo "  - Requires: libx11-dev libxrender-dev libxext-dev"
 
 # Version info
 version:
 	@echo "KD100 Makefile v$(VERSION)"
 	@echo "Compiler: $(shell $(CC) --version | head -1)"
 
-.PHONY: all debug release install gdb valgrind strace analyze asan ubsan clean help version
+.PHONY: all debug release install gdb valgrind strace analyze asan ubsan check-deps clean help version
 

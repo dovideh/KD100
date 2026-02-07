@@ -4,6 +4,9 @@
 #include "handler.h"
 #include "utils.h"
 #include "compat.h"
+#include "osd.h"
+#include "profiles.h"
+#include "window.h"
 #include <libusb-1.0/libusb.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,17 +29,89 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
     int wheel_current_set = 0;      // Current set: 0 (functions 0-1), 1 (functions 2-3), 2 (functions 4-5)
     int wheel_position_in_set = 0;  // Position within set: 0 or 1
 
+    // OSD and profile manager state
+    osd_state_t* osd = NULL;
+    profile_manager_t* profile_manager = NULL;
+    struct timeval last_profile_check = {0, 0};
+    config_t* active_config = config;  // Currently active configuration
+
     system("clear");
 
     if (debug > 0) {
         if (debug > 2)
             debug = 2;
-        printf("Version 1.5.1 - Wheel Toggle Modes\n");
+        printf("Version 1.6.0 - OSD & Profile System\n");
         printf("Debug level: %d\n", debug);
     }
 
     // Print configuration if debug
     config_print(config, debug);
+
+    // Initialize OSD if enabled
+    if (config->osd.enabled) {
+        osd = osd_create(config);
+        if (osd != NULL) {
+            // Apply OSD settings from config
+            osd->pos_x = config->osd.pos_x;
+            osd->pos_y = config->osd.pos_y;
+            osd->opacity = config->osd.opacity;
+            osd->display_duration_ms = config->osd.display_duration_ms;
+            osd->min_width = config->osd.min_width;
+            osd->min_height = config->osd.min_height;
+            osd->expanded_width = config->osd.expanded_width;
+            osd->expanded_height = config->osd.expanded_height;
+            osd->font_size = config->osd.font_size;
+            osd->auto_show = config->osd.auto_show;
+
+            // Initialize X11 display
+            if (osd_init_display(osd) == 0) {
+                // Set initial key descriptions from config
+                for (int i = 0; i < 19; i++) {
+                    if (config->key_descriptions[i]) {
+                        osd_set_key_description(osd, i, config->key_descriptions[i]);
+                    }
+                }
+
+                // Show OSD if start_visible is set
+                if (config->osd.start_visible) {
+                    osd_show(osd);
+                }
+                printf("OSD: Initialized successfully\n");
+            } else {
+                printf("OSD: Failed to initialize X11 display\n");
+                osd_destroy(osd);
+                osd = NULL;
+            }
+        } else {
+            printf("OSD: Failed to create OSD state\n");
+        }
+    }
+
+    // Initialize profile manager if profiles file is configured
+    if (config->profile.profiles_file) {
+        profile_manager = profile_manager_create(config);
+        if (profile_manager != NULL) {
+            profile_manager_set_debug(profile_manager, debug);
+
+            // Initialize with shared display if OSD is enabled
+            void* shared_display = osd ? osd->display : NULL;
+            if (profile_manager_init(profile_manager, shared_display, osd) == 0) {
+                // Load profiles from file
+                if (profile_manager_load(profile_manager, config->profile.profiles_file) == 0) {
+                    printf("Profiles: Loaded from %s\n", config->profile.profiles_file);
+                    if (debug) {
+                        profile_manager_print(profile_manager);
+                    }
+                } else {
+                    printf("Profiles: Failed to load from %s\n", config->profile.profiles_file);
+                }
+            } else {
+                printf("Profiles: Failed to initialize manager\n");
+                profile_manager_destroy(profile_manager);
+                profile_manager = NULL;
+            }
+        }
+    }
 
     // Check module state
     int uclogic_loaded = is_module_loaded("hid_uclogic");
@@ -265,7 +340,7 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                 }
 
                 printf("Driver is running!\n");
-                printf("Enhanced Leader Key System v1.5.1\n");
+                printf("Enhanced Leader Key System v1.6.0\n");
                 printf("Mode: %s | Timeout: %d ms\n",
                        leader_mode_to_string(config->leader.mode), config->leader.timeout_ms);
                 printf("Wheel Mode: %s", config->wheel_mode == WHEEL_MODE_SEQUENTIAL ? "sequential" : "sets");
@@ -280,10 +355,44 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                 while (err >= 0) {
                     unsigned char data[40];
                     int keycode = 0;
-                    err = libusb_interrupt_transfer(handle, 0x81, data, sizeof(data), NULL, 0);
 
-                    if (err == LIBUSB_ERROR_TIMEOUT)
-                        printf("\nTIMEDOUT\n");
+                    // Update OSD (process X11 events and auto-hide timer)
+                    if (osd) {
+                        osd_update(osd);
+                    }
+
+                    // Check for profile switches periodically
+                    if (profile_manager && config->profile.auto_switch) {
+                        struct timeval now;
+                        gettimeofday(&now, NULL);
+                        long time_since_check =
+                            (now.tv_sec - last_profile_check.tv_sec) * 1000 +
+                            (now.tv_usec - last_profile_check.tv_usec) / 1000;
+
+                        if (time_since_check >= config->profile.check_interval_ms) {
+                            last_profile_check = now;
+                            int profile_changed = profile_manager_update(profile_manager);
+                            if (profile_changed > 0) {
+                                // Get new active config
+                                config_t* new_config = profile_manager_get_config(profile_manager);
+                                if (new_config != NULL) {
+                                    active_config = new_config;
+                                    if (debug) {
+                                        printf("Switched to profile config\n");
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Use 50ms timeout to allow OSD event processing (dragging, etc.)
+                    err = libusb_interrupt_transfer(handle, 0x81, data, sizeof(data), NULL, 50);
+
+                    if (err == LIBUSB_ERROR_TIMEOUT) {
+                        // Normal timeout - just continue to process OSD events
+                        err = 0;  // Reset err so loop continues
+                        continue;
+                    }
                     if (err == LIBUSB_ERROR_PIPE)
                         printf("\nPIPE ERROR\n");
                     if (err == LIBUSB_ERROR_NO_DEVICE)
@@ -398,18 +507,34 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                         int button_index = find_button_index(keycode);
 
                         if (button_index != -1) {
+                            // Check for OSD toggle button
+                            if (config->osd.enabled && button_index == config->osd.osd_toggle_button && osd) {
+                                osd_toggle_mode(osd);
+                                if (debug) {
+                                    printf("OSD mode toggled\n");
+                                }
+                            }
+
+                            // Record action to OSD
+                            if (osd && active_config && button_index < active_config->totalButtons) {
+                                const char* action = active_config->events[button_index].function;
+                                if (action && strcmp(action, "NULL") != 0) {
+                                    osd_record_action(osd, button_index, action);
+                                }
+                            }
+
                             // Process button press with leader system
-                            process_leader_combination(&config->leader, config->events, button_index, debug);
+                            process_leader_combination(&active_config->leader, active_config->events, button_index, debug);
 
                             // Also handle legacy single-button events for compatibility
-                            if (config->events[button_index].function != NULL) {
-                                if (strcmp(config->events[button_index].function, "NULL") == 0) {
+                            if (active_config->events[button_index].function != NULL) {
+                                if (strcmp(active_config->events[button_index].function, "NULL") == 0) {
                                     if (prevEvent.type != 0) {
                                         Handler(prevEvent.function, prevEvent.type, debug);
                                         prevEvent.type = 0;
                                         prevEvent.function = "";
                                     }
-                                } else if (strcmp(config->events[button_index].function, "swap") == 0) {
+                                } else if (strcmp(active_config->events[button_index].function, "swap") == 0) {
                                     // Check wheel mode
                                     if (config->wheel_mode == WHEEL_MODE_SEQUENTIAL) {
                                         // Sequential mode: simple cycling through all functions
@@ -454,19 +579,19 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                                         last_button18_time = now;
                                         // Don't process yet - wait for timeout (checked at top of loop)
                                     }
-                                } else if (strcmp(config->events[button_index].function, "mouse1") == 0 ||
-                                           strcmp(config->events[button_index].function, "mouse2") == 0 ||
-                                           strcmp(config->events[button_index].function, "mouse3") == 0 ||
-                                           strcmp(config->events[button_index].function, "mouse4") == 0 ||
-                                           strcmp(config->events[button_index].function, "mouse5") == 0) {
-                                    if (strcmp(config->events[button_index].function, prevEvent.function)) {
+                                } else if (strcmp(active_config->events[button_index].function, "mouse1") == 0 ||
+                                           strcmp(active_config->events[button_index].function, "mouse2") == 0 ||
+                                           strcmp(active_config->events[button_index].function, "mouse3") == 0 ||
+                                           strcmp(active_config->events[button_index].function, "mouse4") == 0 ||
+                                           strcmp(active_config->events[button_index].function, "mouse5") == 0) {
+                                    if (strcmp(active_config->events[button_index].function, prevEvent.function)) {
                                         if (prevEvent.type != 0) {
                                             Handler(prevEvent.function, prevEvent.type, debug);
                                         }
-                                        prevEvent.function = config->events[button_index].function;
+                                        prevEvent.function = active_config->events[button_index].function;
                                         prevEvent.type = 3;
                                     }
-                                    Handler(config->events[button_index].function, 2, debug);
+                                    Handler(active_config->events[button_index].function, 2, debug);
                                 }
                             }
                         }
@@ -479,14 +604,14 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                         }
                         printf("]\n");
 
-                        if (config->leader.toggle_state) {
-                            printf("Leader toggle: ON (mode: %s)\n", leader_mode_to_string(config->leader.mode));
-                        } else if (config->leader.leader_active) {
+                        if (active_config->leader.toggle_state) {
+                            printf("Leader toggle: ON (mode: %s)\n", leader_mode_to_string(active_config->leader.mode));
+                        } else if (active_config->leader.leader_active) {
                             struct timeval now;
                             gettimeofday(&now, NULL);
-                            long elapsed = time_diff_ms(config->leader.leader_press_time, now);
+                            long elapsed = time_diff_ms(active_config->leader.leader_press_time, now);
                             printf("Leader active: YES (%ld ms elapsed, mode: %s)\n",
-                                   elapsed, leader_mode_to_string(config->leader.mode));
+                                   elapsed, leader_mode_to_string(active_config->leader.mode));
                         } else {
                             printf("Leader active: NO\n");
                         }
@@ -510,5 +635,13 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
             }
         }
         libusb_free_device_list(devs, 1);
+    }
+
+    // Cleanup OSD and profile manager
+    if (osd) {
+        osd_destroy(osd);
+    }
+    if (profile_manager) {
+        profile_manager_destroy(profile_manager);
     }
 }
