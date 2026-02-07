@@ -97,6 +97,7 @@ osd_state_t* osd_create(config_t* config) {
     // Initialize key descriptions to NULL
     for (int i = 0; i < 19; i++) {
         osd->key_descriptions[i] = NULL;
+        osd->leader_descriptions[i] = NULL;
     }
 
     // Initialize active button state
@@ -136,6 +137,7 @@ void osd_destroy(osd_state_t* osd) {
     // Free key descriptions
     for (int i = 0; i < 19; i++) {
         if (osd->key_descriptions[i]) free(osd->key_descriptions[i]);
+        if (osd->leader_descriptions[i]) free(osd->leader_descriptions[i]);
     }
 
     // Free wheel descriptions
@@ -439,9 +441,11 @@ static void draw_button_key(Display* dpy, Window win, GC gc, osd_state_t* osd,
     snprintf(num, sizeof(num), "%d", btn);
     XDrawString(dpy, win, gc, x + text_offset_x, y + text_offset_y1, num, strlen(num));
 
-    // Draw description or function
+    // Draw description or function (swap to leader description when leader is active)
     const char* desc = NULL;
-    if (osd->key_descriptions[btn]) {
+    if (is_leader_modified && osd->leader_descriptions[btn]) {
+        desc = osd->leader_descriptions[btn];
+    } else if (osd->key_descriptions[btn]) {
         desc = osd->key_descriptions[btn];
     } else if (osd->config && btn < osd->config->totalButtons &&
                osd->config->events[btn].function) {
@@ -905,6 +909,16 @@ void osd_set_key_description(osd_state_t* osd, int button_index, const char* des
         free(osd->key_descriptions[button_index]);
     }
     osd->key_descriptions[button_index] = description ? strdup(description) : NULL;
+}
+
+// Set leader key description
+void osd_set_leader_description(osd_state_t* osd, int button_index, const char* description) {
+    if (osd == NULL || button_index < 0 || button_index > 18) return;
+
+    if (osd->leader_descriptions[button_index]) {
+        free(osd->leader_descriptions[button_index]);
+    }
+    osd->leader_descriptions[button_index] = description ? strdup(description) : NULL;
 }
 
 // Get key description

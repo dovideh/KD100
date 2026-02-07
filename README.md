@@ -6,11 +6,12 @@ Originally forked from [mckset/KD100](https://github.com/mckset/KD100), now inde
 
 A simple driver for the Huion KD100 mini Keydial written in C to give the device some usability while waiting for Huion to fix their Linux drivers. Each button can be configured to either act as a key/multiple keys or to execute a program/command.
 
-**Version 1.7.0** enhances the OSD with active button highlighting, wheel function descriptions, wheel set indicators, leader key visual feedback, and action aggregation for wheel events.
+**Version 1.7.1** adds leader key descriptions — per-button labels that swap in when the leader key is active, shown in the expanded OSD keyboard layout. Also includes all v1.7.0 enhancements: active button highlighting, wheel function descriptions, wheel set indicators, leader key visual feedback, and action aggregation.
 
 > **NOTICE:** When updating from **v1.31** or below, make sure you updated your config file to follow the new format shown in the default config file.
 
 ## Features
+- **Leader Key Descriptions (v1.7.1)**: Per-button descriptions that swap in when leader is active
 - **Wheel Function Descriptions (v1.7.0)**: Human-readable names for wheel functions shown in OSD
 - **Active Button Highlighting (v1.7.0)**: Pressed buttons flash green in expanded keyboard layout
 - **Leader Key Visual Feedback (v1.7.0)**: Orange highlight for active leader, purple tint for eligible keys
@@ -33,7 +34,7 @@ A simple driver for the Huion KD100 mini Keydial written in C to give the device
 - **Clean Compilation**: Zero warnings with strict compiler flags
 - **Better Code Organization**: Easy to extend and maintain
 
-## Architecture (v1.7.0)
+## Architecture (v1.7.1)
 
 The codebase is organized into focused modules:
 
@@ -149,6 +150,21 @@ function: p
 leader_eligible: false # Cannot be modified by leader
 ```
 
+### Leader Key Descriptions (v1.7.1)
+Each button can have a separate description shown when the leader key is active. This lets you display the modified action in the OSD expanded view.
+
+```bash
+# Format: leader_description_<button_number>: <description>
+# Maximum 64 characters, printable ASCII only
+# Only define for leader-eligible buttons
+
+leader_description_0: Shift+Brush
+leader_description_2: Shift+Transform
+leader_description_3: Shift+Lasso
+```
+
+When the leader key is active, eligible buttons in the OSD keyboard layout swap their label to the leader description (shown with a purple tint). Non-eligible buttons keep their normal description.
+
 ### Configuration Example
 ```bash
 # Leader configuration
@@ -167,6 +183,10 @@ Button 18                  # Wheel toggle button
 type: 1
 function: swap
 leader_eligible: false    # Typically not eligible
+
+# Leader descriptions (shown in OSD when leader is active)
+leader_description_0: Shift+Brush
+leader_description_2: Shift+Transform
 ```
 
 ## On-Screen Display (OSD)
@@ -486,7 +506,15 @@ If you encounter permission errors or device conflicts:
 
 ## Version History
 
-### v1.7.0 (Current) - Enhanced OSD Feedback & Wheel Descriptions
+### v1.7.1 (Current) - Leader Key Descriptions
+- **Leader Key Descriptions**: New `leader_description_N` config fields for per-button labels when leader is active
+  - Descriptions swap in on eligible buttons in the expanded OSD keyboard layout
+  - Purple-tinted buttons show the leader description instead of the normal one
+  - Input validation: max 64 chars, printable ASCII only
+- **Configuration**: `leader_description_<button_number>: <description>` in config file
+- **Version Bump**: Updated version strings across all modules
+
+### v1.7.0 - Enhanced OSD Feedback & Wheel Descriptions
 - **Wheel Function Descriptions**: New `wheel_description_N` config fields for human-readable names
   - Shown in OSD set indicator, function pair display, and action messages
   - Replaces inline comments after wheel function lines in config

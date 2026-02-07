@@ -55,7 +55,8 @@ typedef struct {
     wheel_mode_t wheel_mode;     // Wheel toggle mode (sequential or sets)
     osd_config_t osd;            // OSD settings
     profile_config_t profile;    // Profile settings
-    char* key_descriptions[19];  // Per-button descriptions (for default profile)
+    char* key_descriptions[19];         // Per-button descriptions (for default profile)
+    char* leader_descriptions[19];      // Per-button descriptions when leader is active
 } config_t;
 
 // Configuration functions

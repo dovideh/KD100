@@ -73,7 +73,8 @@ typedef struct {
     config_t* config;
 
     // Key descriptions for the current profile
-    char* key_descriptions[19];   // Descriptions for buttons 0-18
+    char* key_descriptions[19];    // Descriptions for buttons 0-18
+    char* leader_descriptions[19]; // Descriptions when leader is active
 
     // Active button highlighting
     int active_button;            // Currently pressed button (-1 = none)
@@ -110,6 +111,7 @@ void osd_move(osd_state_t* osd, int dx, int dy);
 
 // Key description functions
 void osd_set_key_description(osd_state_t* osd, int button_index, const char* description);
+void osd_set_leader_description(osd_state_t* osd, int button_index, const char* description);
 const char* osd_get_key_description(osd_state_t* osd, int button_index);
 void osd_clear_descriptions(osd_state_t* osd);
 

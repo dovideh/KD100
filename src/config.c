@@ -148,6 +148,7 @@ config_t* config_create(void) {
     // Initialize key descriptions
     for (int i = 0; i < 19; i++) {
         config->key_descriptions[i] = NULL;
+        config->leader_descriptions[i] = NULL;
     }
 
     return config;
@@ -193,6 +194,9 @@ void config_destroy(config_t* config) {
     for (int i = 0; i < 19; i++) {
         if (config->key_descriptions[i] != NULL) {
             free(config->key_descriptions[i]);
+        }
+        if (config->leader_descriptions[i] != NULL) {
+            free(config->leader_descriptions[i]);
         }
     }
 
@@ -453,6 +457,25 @@ int config_load(config_t* config, const char* filename, int debug) {
             continue;
         }
 
+        // Parse leader key descriptions (leader_description_0, leader_description_1, etc.)
+        if (strncasecmp(line, "leader_description_", 19) == 0) {
+            char* num_str = line + 19;
+            char* colon = strchr(num_str, ':');
+            if (colon) {
+                *colon = '\0';
+                int btn = atoi(num_str);
+                if (btn >= 0 && btn <= 18) {
+                    char* value = colon + 1;
+                    while (*value == ' ') value++;
+                    if (config->leader_descriptions[btn]) free(config->leader_descriptions[btn]);
+                    config->leader_descriptions[btn] = sanitize_description(value);
+                    if (debug) printf("Config: leader_description_%d = %s\n", btn,
+                                      config->leader_descriptions[btn] ? config->leader_descriptions[btn] : "(empty)");
+                }
+            }
+            continue;
+        }
+
         // Parse wheel descriptions (wheel_description_0, wheel_description_1, etc.)
         if (strncasecmp(line, "wheel_description_", 18) == 0) {
             char* num_str = line + 18;
@@ -692,6 +715,18 @@ void config_print(const config_t* config, int debug) {
                 has_descriptions = 1;
             }
             printf("Button %d: %s\n", i, config->key_descriptions[i]);
+        }
+    }
+
+    // Print leader key descriptions if any are set
+    int has_leader_descriptions = 0;
+    for (int i = 0; i < 19; i++) {
+        if (config->leader_descriptions[i]) {
+            if (!has_leader_descriptions) {
+                printf("\n=== Leader Key Descriptions ===\n");
+                has_leader_descriptions = 1;
+            }
+            printf("Button %d (leader): %s\n", i, config->leader_descriptions[i]);
         }
     }
 

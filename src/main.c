@@ -1,5 +1,5 @@
 /*
-	V1.7.0 - Enhanced OSD Feedback & Wheel Descriptions
+	V1.7.1 - Leader Key Descriptions
 	https://github.com/mckset/KD100.git
 	KD100 Linux driver for X11 desktops
 	Features:
@@ -169,7 +169,7 @@ int main(int args, char *in[]) {
             printf("\t-d [-d]\t\tEnable debug outputs (use twice to view data sent by the device)\n");
             printf("\t-dry \t\tDisplay data sent by the device without sending events\n");
             printf("\t-h\t\tDisplays this message\n");
-            printf("\nNew in v1.7.0 - ENHANCED OSD FEEDBACK:\n");
+            printf("\nNew in v1.7.1 - LEADER KEY DESCRIPTIONS:\n");
             printf("\t• Wheel function descriptions (wheel_description_N: name)\n");
             printf("\t• Active button highlighting in expanded keyboard layout\n");
             printf("\t• Leader key visual feedback (orange/purple indicators)\n");
@@ -249,8 +249,8 @@ int main(int args, char *in[]) {
         }
     }
 
-    printf("\nKD100 Driver v1.7.0 - Enhanced OSD Feedback & Wheel Descriptions\n");
-    printf("Features: OSD overlay | Profile switching | Wheel descriptions | Button highlighting\n\n");
+    printf("\nKD100 Driver v1.7.1 - Leader Key Descriptions\n");
+    printf("Features: OSD overlay | Profile switching | Wheel descriptions | Leader descriptions | Button highlighting\n\n");
 
     // Run device handler
     device_run(ctx, config, debug, accept, dry);
