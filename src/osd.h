@@ -18,6 +18,19 @@ typedef struct {
     long timestamp_ms;    // When it was pressed
 } recent_action_t;
 
+// Wheel state information for OSD display
+typedef struct {
+    int current_set;              // Current active set (0, 1, 2)
+    int position_in_set;          // Position within set (0 or 1)
+    int wheel_function;           // Current wheel function index
+    int wheel_mode;               // 0 = sequential, 1 = sets
+    int total_wheels;             // Total number of wheel functions
+    char* descriptions[32];       // Descriptions for each wheel function
+    char* last_wheel_action;      // Last aggregated wheel action description
+    long last_wheel_time_ms;      // Timestamp of last wheel event
+    int wheel_action_count;       // Count of repeated wheel actions (for aggregation)
+} osd_wheel_state_t;
+
 // OSD state structure
 typedef struct {
     osd_mode_t mode;              // Current display mode
@@ -60,7 +73,19 @@ typedef struct {
     config_t* config;
 
     // Key descriptions for the current profile
-    char* key_descriptions[19];   // Descriptions for buttons 0-18
+    char* key_descriptions[19];    // Descriptions for buttons 0-18
+    char* leader_descriptions[19]; // Descriptions when leader is active
+
+    // Active button highlighting
+    int active_button;            // Currently pressed button (-1 = none)
+    long active_button_time_ms;   // When the button was pressed
+
+    // Leader state feedback
+    int leader_active;            // Is leader key currently active
+    int leader_button;            // Which button is the leader
+
+    // Wheel state
+    osd_wheel_state_t wheel;
 } osd_state_t;
 
 // OSD lifecycle functions
@@ -76,6 +101,7 @@ void osd_set_mode(osd_state_t* osd, osd_mode_t mode);
 
 // OSD update functions
 void osd_record_action(osd_state_t* osd, int button_index, const char* action);
+void osd_record_wheel_action(osd_state_t* osd, const char* direction, const char* description);
 void osd_update(osd_state_t* osd);       // Process X11 events and redraw if needed
 void osd_redraw(osd_state_t* osd);       // Force redraw
 
@@ -85,11 +111,21 @@ void osd_move(osd_state_t* osd, int dx, int dy);
 
 // Key description functions
 void osd_set_key_description(osd_state_t* osd, int button_index, const char* description);
+void osd_set_leader_description(osd_state_t* osd, int button_index, const char* description);
 const char* osd_get_key_description(osd_state_t* osd, int button_index);
 void osd_clear_descriptions(osd_state_t* osd);
 
 // Configuration
 void osd_set_opacity(osd_state_t* osd, float opacity);
 void osd_set_display_duration(osd_state_t* osd, int duration_ms);
+
+// Wheel state functions
+void osd_set_wheel_state(osd_state_t* osd, int current_set, int position_in_set,
+                          int wheel_function, int wheel_mode, int total_wheels);
+void osd_set_wheel_description(osd_state_t* osd, int index, const char* description);
+
+// Active button and leader state
+void osd_set_active_button(osd_state_t* osd, int button_index);
+void osd_set_leader_state(osd_state_t* osd, int active, int leader_button);
 
 #endif // OSD_H

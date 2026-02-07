@@ -45,6 +45,43 @@ static char* strip_inline_comment(char* str) {
     return str;
 }
 
+// Sanitize a description string: enforce max length, printable ASCII only
+static char* sanitize_description(const char* input) {
+    if (input == NULL) return NULL;
+
+    // Skip leading whitespace
+    while (*input == ' ' || *input == '\t') input++;
+
+    size_t len = strlen(input);
+    if (len > MAX_DESCRIPTION_LEN) {
+        len = MAX_DESCRIPTION_LEN;
+    }
+
+    char* result = malloc(len + 1);
+    if (result == NULL) return NULL;
+
+    size_t j = 0;
+    for (size_t i = 0; i < len && input[i] != '\0'; i++) {
+        // Only allow printable ASCII (space through tilde)
+        if (input[i] >= 0x20 && input[i] <= 0x7E) {
+            result[j++] = input[i];
+        }
+    }
+    result[j] = '\0';
+
+    // Trim trailing whitespace
+    while (j > 0 && (result[j-1] == ' ' || result[j-1] == '\t')) {
+        result[--j] = '\0';
+    }
+
+    if (j == 0) {
+        free(result);
+        return NULL;
+    }
+
+    return result;
+}
+
 // Create a new configuration structure
 config_t* config_create(void) {
     config_t* config = malloc(sizeof(config_t));
@@ -86,6 +123,7 @@ config_t* config_create(void) {
 
     config->wheelEvents[0].right = NULL;
     config->wheelEvents[0].left = NULL;
+    config->wheelEvents[0].description = NULL;
 
     // Initialize OSD settings
     config->osd.enabled = 0;
@@ -110,6 +148,7 @@ config_t* config_create(void) {
     // Initialize key descriptions
     for (int i = 0; i < 19; i++) {
         config->key_descriptions[i] = NULL;
+        config->leader_descriptions[i] = NULL;
     }
 
     return config;
@@ -135,6 +174,9 @@ void config_destroy(config_t* config) {
         if (config->wheelEvents[i].left != NULL) {
             free(config->wheelEvents[i].left);
         }
+        if (config->wheelEvents[i].description != NULL) {
+            free(config->wheelEvents[i].description);
+        }
     }
     free(config->wheelEvents);
 
@@ -152,6 +194,9 @@ void config_destroy(config_t* config) {
     for (int i = 0; i < 19; i++) {
         if (config->key_descriptions[i] != NULL) {
             free(config->key_descriptions[i]);
+        }
+        if (config->leader_descriptions[i] != NULL) {
+            free(config->leader_descriptions[i]);
         }
     }
 
@@ -404,8 +449,60 @@ int config_load(config_t* config, const char* filename, int debug) {
                     char* value = colon + 1;
                     while (*value == ' ') value++;
                     if (config->key_descriptions[btn]) free(config->key_descriptions[btn]);
-                    config->key_descriptions[btn] = strdup(value);
-                    if (debug) printf("Config: description_%d = %s\n", btn, config->key_descriptions[btn]);
+                    config->key_descriptions[btn] = sanitize_description(value);
+                    if (debug) printf("Config: description_%d = %s\n", btn,
+                                      config->key_descriptions[btn] ? config->key_descriptions[btn] : "(empty)");
+                }
+            }
+            continue;
+        }
+
+        // Parse leader key descriptions (leader_description_0, leader_description_1, etc.)
+        if (strncasecmp(line, "leader_description_", 19) == 0) {
+            char* num_str = line + 19;
+            char* colon = strchr(num_str, ':');
+            if (colon) {
+                *colon = '\0';
+                int btn = atoi(num_str);
+                if (btn >= 0 && btn <= 18) {
+                    char* value = colon + 1;
+                    while (*value == ' ') value++;
+                    if (config->leader_descriptions[btn]) free(config->leader_descriptions[btn]);
+                    config->leader_descriptions[btn] = sanitize_description(value);
+                    if (debug) printf("Config: leader_description_%d = %s\n", btn,
+                                      config->leader_descriptions[btn] ? config->leader_descriptions[btn] : "(empty)");
+                }
+            }
+            continue;
+        }
+
+        // Parse wheel descriptions (wheel_description_0, wheel_description_1, etc.)
+        if (strncasecmp(line, "wheel_description_", 18) == 0) {
+            char* num_str = line + 18;
+            char* colon = strchr(num_str, ':');
+            if (colon) {
+                *colon = '\0';
+                int idx = atoi(num_str);
+                if (idx >= 0 && idx < 32) {  // reasonable limit
+                    char* value = colon + 1;
+                    while (*value == ' ') value++;
+                    // Ensure we have enough wheel slots
+                    if (idx >= (rightWheels > leftWheels ? rightWheels : leftWheels)) {
+                        int needed = idx + 1;
+                        wheel* temp = realloc(config->wheelEvents, needed * sizeof(*config->wheelEvents));
+                        if (temp != NULL) {
+                            config->wheelEvents = temp;
+                            for (int j = (rightWheels > leftWheels ? rightWheels : leftWheels); j < needed; j++) {
+                                config->wheelEvents[j].right = NULL;
+                                config->wheelEvents[j].left = NULL;
+                                config->wheelEvents[j].description = NULL;
+                            }
+                        }
+                    }
+                    if (config->wheelEvents[idx].description) free(config->wheelEvents[idx].description);
+                    config->wheelEvents[idx].description = sanitize_description(value);
+                    if (debug) printf("Config: wheel_description_%d = %s\n", idx,
+                                      config->wheelEvents[idx].description ? config->wheelEvents[idx].description : "(empty)");
                 }
             }
             continue;
@@ -496,6 +593,7 @@ int config_load(config_t* config, const char* filename, int debug) {
                     config->wheelEvents = temp;
                     config->wheelEvents[rightWheels].right = func_copy;
                     config->wheelEvents[rightWheels].left = NULL;
+                    config->wheelEvents[rightWheels].description = NULL;
                 } else {
                     config->wheelEvents[0].right = func_copy;
                     config->wheelEvents[0].left = NULL;
@@ -518,6 +616,7 @@ int config_load(config_t* config, const char* filename, int debug) {
                     config->wheelEvents = temp;
                     config->wheelEvents[leftWheels].left = func_copy;
                     config->wheelEvents[leftWheels].right = NULL;
+                    config->wheelEvents[leftWheels].description = NULL;
                 }
                 leftWheels++;
             }
@@ -575,9 +674,10 @@ void config_print(const config_t* config, int debug) {
 
     printf("\n=== Wheel Configuration ===\n");
     for (int i = 0; i < config->totalWheels; i++) {
-        printf("Wheel %d: Right: %s | Left: %s\n", i,
+        printf("Wheel %d: Right: %s | Left: %s | Desc: %s\n", i,
                config->wheelEvents[i].right ? config->wheelEvents[i].right : "(null)",
-               config->wheelEvents[i].left ? config->wheelEvents[i].left : "(null)");
+               config->wheelEvents[i].left ? config->wheelEvents[i].left : "(null)",
+               config->wheelEvents[i].description ? config->wheelEvents[i].description : "(none)");
     }
 
     printf("\n=== Leader Configuration ===\n");
@@ -615,6 +715,18 @@ void config_print(const config_t* config, int debug) {
                 has_descriptions = 1;
             }
             printf("Button %d: %s\n", i, config->key_descriptions[i]);
+        }
+    }
+
+    // Print leader key descriptions if any are set
+    int has_leader_descriptions = 0;
+    for (int i = 0; i < 19; i++) {
+        if (config->leader_descriptions[i]) {
+            if (!has_leader_descriptions) {
+                printf("\n=== Leader Key Descriptions ===\n");
+                has_leader_descriptions = 1;
+            }
+            printf("Button %d (leader): %s\n", i, config->leader_descriptions[i]);
         }
     }
 

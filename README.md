@@ -2,15 +2,23 @@
 Originally forked from [mckset/KD100](https://github.com/mckset/KD100), now independently maintained with major enhancements.
 
 
-![KD100-OSD](OSD-full.png)
+![KD100-OSD](KD100-osd.gif)
 
 A simple driver for the Huion KD100 mini Keydial written in C to give the device some usability while waiting for Huion to fix their Linux drivers. Each button can be configured to either act as a key/multiple keys or to execute a program/command.
 
-**Version 1.6.0** adds an on-screen display (OSD) overlay showing key actions and keyboard layout, with profile support for automatic configuration switching based on active window.
+**Version 1.7.1** adds leader key descriptions — per-button labels that swap in when the leader key is active, shown in the expanded OSD keyboard layout. Also includes all v1.7.0 enhancements: active button highlighting, wheel function descriptions, wheel set indicators, leader key visual feedback, and action aggregation.
 
 > **NOTICE:** When updating from **v1.31** or below, make sure you updated your config file to follow the new format shown in the default config file.
 
 ## Features
+- **Leader Key Descriptions (v1.7.1)**: Per-button descriptions that swap in when leader is active
+- **Wheel Function Descriptions (v1.7.0)**: Human-readable names for wheel functions shown in OSD
+- **Active Button Highlighting (v1.7.0)**: Pressed buttons flash green in expanded keyboard layout
+- **Leader Key Visual Feedback (v1.7.0)**: Orange highlight for active leader, purple tint for eligible keys
+- **Wheel Set Indicator (v1.7.0)**: Numbered set boxes with green active highlight next to mode display
+- **Wheel Action Aggregation (v1.7.0)**: Repeated wheel turns show as single action, not per-tick
+- **Mode & Leader Status Display (v1.7.0)**: Mode, leader, and set info shown at top of both OSD views
+- **Input Validation (v1.7.0)**: Description fields sanitized (max 64 chars, printable ASCII only)
 - **On-Screen Display (v1.6.0)**: Semi-transparent overlay showing recent key actions and full keyboard layout
 - **Profile System (v1.6.0)**: Automatic configuration switching based on active window title
 - **Scalable UI (v1.6.0)**: Font size setting scales entire OSD proportionally
@@ -26,7 +34,7 @@ A simple driver for the Huion KD100 mini Keydial written in C to give the device
 - **Clean Compilation**: Zero warnings with strict compiler flags
 - **Better Code Organization**: Easy to extend and maintain
 
-## Architecture (v1.6.0)
+## Architecture (v1.7.1)
 
 The codebase is organized into focused modules:
 
@@ -142,6 +150,21 @@ function: p
 leader_eligible: false # Cannot be modified by leader
 ```
 
+### Leader Key Descriptions (v1.7.1)
+Each button can have a separate description shown when the leader key is active. This lets you display the modified action in the OSD expanded view.
+
+```bash
+# Format: leader_description_<button_number>: <description>
+# Maximum 64 characters, printable ASCII only
+# Only define for leader-eligible buttons
+
+leader_description_0: Shift+Brush
+leader_description_2: Shift+Transform
+leader_description_3: Shift+Lasso
+```
+
+When the leader key is active, eligible buttons in the OSD keyboard layout swap their label to the leader description (shown with a purple tint). Non-eligible buttons keep their normal description.
+
 ### Configuration Example
 ```bash
 # Leader configuration
@@ -160,6 +183,10 @@ Button 18                  # Wheel toggle button
 type: 1
 function: swap
 leader_eligible: false    # Typically not eligible
+
+# Leader descriptions (shown in OSD when leader is active)
+leader_description_0: Shift+Brush
+leader_description_2: Shift+Transform
 ```
 
 ## On-Screen Display (OSD)
@@ -168,8 +195,13 @@ leader_eligible: false    # Typically not eligible
 Version 1.6.0 introduces a semi-transparent on-screen display overlay, similar to Blender's screencast keys feature. The OSD shows recent key actions and can expand to show the full keyboard layout.
 
 ### Features
-- **Minimal Mode**: Shows recent key actions (e.g., "B0 - Brush (b)")
-- **Expanded Mode**: Shows full keyboard layout with key descriptions
+- **Minimal Mode**: Shows mode/set info, active wheel function pair, and 3 recent actions
+- **Expanded Mode**: Full keyboard layout with button highlighting, wheel set indicator, and 3 recent actions
+- **Active Button Highlighting**: Pressed buttons flash green in the keyboard layout
+- **Leader Key Feedback**: Leader button glows orange when active; eligible keys tinted purple
+- **Wheel Set Indicator**: Numbered boxes `[1][2][3]` next to mode, green = active set (grayed in sequential mode)
+- **Wheel Function Display**: Shows both functions in current set with `>` on the active one
+- **Wheel Action Aggregation**: Repeated wheel turns displayed as a single action
 - **Auto-Show/Hide**: Appears when keys are pressed, hides after timeout
 - **Hover Detection**: Stays visible while cursor hovers over it
 - **Draggable**: Click and drag anywhere on the window to move it
@@ -315,21 +347,46 @@ wheel_click_timeout: 300
 
 # Clockwise wheel functions
 Wheel
-function: bracketright        # Set 1, function 0 - Brush size increase
-function: o                   # Set 1, function 1 - Opacity increase
-function: shift+bracketright  # Set 2, function 2 - Flow increase
-function: ctrl+bracketright   # Set 2, function 3 - Rotation clockwise
-function: alt+bracketright    # Set 3, function 4 - Scatter increase
-function: super+bracketright  # Set 3, function 5 - Spacing increase
+function: bracketright
+function: o
+function: shift+bracketright
+function: ctrl+bracketright
+function: alt+bracketright
+function: super+bracketright
 
 # Counter-clockwise wheel functions
 Wheel
-function: bracketleft         # Set 1, function 0 - Brush size decrease
-function: i                   # Set 1, function 1 - Opacity decrease
-function: shift+bracketleft   # Set 2, function 2 - Flow decrease
-function: ctrl+bracketleft    # Set 2, function 3 - Rotation counter-clockwise
-function: alt+bracketleft     # Set 3, function 4 - Scatter decrease
-function: super+bracketleft   # Set 3, function 5 - Spacing decrease
+function: bracketleft
+function: i
+function: shift+bracketleft
+function: ctrl+bracketleft
+function: alt+bracketleft
+function: super+bracketleft
+
+# Wheel function descriptions (shown in OSD)
+wheel_description_0: Brush Size
+wheel_description_1: Opacity
+wheel_description_2: Flow
+wheel_description_3: Rotation
+wheel_description_4: Scatter
+wheel_description_5: Spacing
+```
+
+### Wheel Function Descriptions (v1.7.0)
+Each wheel function index can have a human-readable description shown in the OSD. Descriptions are displayed in the wheel set indicator, the function pair line, and in action messages.
+
+```bash
+# Format: wheel_description_<index>: <description>
+# Maximum 64 characters, printable ASCII only
+wheel_description_0: Brush Size
+wheel_description_1: Opacity
+```
+
+The OSD displays the current set's function pair with an active indicator:
+```
+Mode: Sets  [1][2][3]
+Leader: OFF
+Set 1:  > Brush Size  |    Opacity
 ```
 
 **Workflow Example:**
@@ -449,7 +506,30 @@ If you encounter permission errors or device conflicts:
 
 ## Version History
 
-### v1.6.0 (Current) - On-Screen Display & Profiles
+### v1.7.1 (Current) - Leader Key Descriptions
+- **Leader Key Descriptions**: New `leader_description_N` config fields for per-button labels when leader is active
+  - Descriptions swap in on eligible buttons in the expanded OSD keyboard layout
+  - Purple-tinted buttons show the leader description instead of the normal one
+  - Input validation: max 64 chars, printable ASCII only
+- **Configuration**: `leader_description_<button_number>: <description>` in config file
+- **Version Bump**: Updated version strings across all modules
+
+### v1.7.0 - Enhanced OSD Feedback & Wheel Descriptions
+- **Wheel Function Descriptions**: New `wheel_description_N` config fields for human-readable names
+  - Shown in OSD set indicator, function pair display, and action messages
+  - Replaces inline comments after wheel function lines in config
+- **Active Button Highlighting**: Pressed buttons flash green for 500ms in expanded view
+- **Leader Key Visual Feedback**: Orange highlight on active leader button, purple tint on eligible keys
+- **Wheel Set Indicator**: Numbered `[1][2][3]` boxes next to mode line, green = active set
+  - Grayed out in sequential mode (visible but inactive)
+- **Wheel Action Aggregation**: Repeated wheel turns coalesced into single display message
+- **Mode & Leader Display**: Dedicated lines for mode+sets and leader state in both views
+  - Leader status on its own row to prevent set boxes being pushed off-screen
+- **3-Command History**: Recent actions shown in both minimal and expanded views
+- **Input Validation**: `sanitize_description()` enforces max 64 chars, printable ASCII only
+- **Layout Improvements**: Wheel info moved to top of both views; consistent shared rendering
+
+### v1.6.0 - On-Screen Display & Profiles
 - **On-Screen Display**: Semi-transparent overlay showing key actions
   - Minimal mode: Recent actions with key descriptions
   - Expanded mode: Full keyboard layout view
