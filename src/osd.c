@@ -392,8 +392,8 @@ void osd_redraw(osd_state_t* osd) {
         long now = osd_get_time_ms();
         int shown = 0;
 
-        // Show up to 4 recent actions
-        for (int i = 0; i < osd->recent_count && shown < 4; i++) {
+        // Show up to 3 recent actions
+        for (int i = 0; i < osd->recent_count && shown < 3; i++) {
             int idx = (osd->recent_head - 1 - i + 10) % 10;
             recent_action_t* action = &osd->recent_actions[idx];
 
