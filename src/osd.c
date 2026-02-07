@@ -535,79 +535,79 @@ void osd_update(osd_state_t* osd) {
     Window win = (Window)osd->window;
     long now = osd_get_time_ms();
 
-    // Auto-hide check: if auto_show is enabled, OSD is visible, cursor is outside, and enough time passed
+    // Process X11 events first (to update cursor_inside before auto-hide check)
+    if (osd->mode != OSD_MODE_HIDDEN) {
+        while (XPending(dpy)) {
+            XEvent event;
+            XNextEvent(dpy, &event);
+
+            switch (event.type) {
+                case Expose:
+                    if (event.xexpose.count == 0) {
+                        osd_redraw(osd);
+                    }
+                    break;
+
+                case ButtonPress:
+                    if (event.xbutton.button == Button1) {
+                        // Start dragging from anywhere on the window
+                        osd->dragging = 1;
+                        osd->drag_start_x = event.xbutton.x_root - osd->pos_x;
+                        osd->drag_start_y = event.xbutton.y_root - osd->pos_y;
+                    }
+                    break;
+
+                case ButtonRelease:
+                    if (event.xbutton.button == Button1) {
+                        if (osd->dragging) {
+                            // If barely moved and clicked in title bar, toggle mode
+                            int dx = event.xbutton.x_root - osd->pos_x - osd->drag_start_x;
+                            int dy = event.xbutton.y_root - osd->pos_y - osd->drag_start_y;
+                            int title_height = osd->font_size + 12;
+                            if (abs(dx) < 5 && abs(dy) < 5 && event.xbutton.y < title_height) {
+                                osd_toggle_mode(osd);
+                            }
+                            osd->dragging = 0;
+                        }
+                    }
+                    break;
+
+                case MotionNotify:
+                    if (osd->dragging) {
+                        // Consume all pending motion events (coalesce)
+                        while (XCheckTypedWindowEvent(dpy, win, MotionNotify, &event));
+
+                        osd->pos_x = event.xmotion.x_root - osd->drag_start_x;
+                        osd->pos_y = event.xmotion.y_root - osd->drag_start_y;
+                        XMoveWindow(dpy, win, osd->pos_x, osd->pos_y);
+                        XFlush(dpy);
+                    }
+                    break;
+
+                case ConfigureNotify:
+                    // Window was moved or resized
+                    break;
+
+                case EnterNotify:
+                    // Cursor entered the window - don't auto-hide while hovering
+                    osd->cursor_inside = 1;
+                    break;
+
+                case LeaveNotify:
+                    // Cursor left the window - restart auto-hide timer
+                    osd->cursor_inside = 0;
+                    osd->last_action_time_ms = osd_get_time_ms();
+                    break;
+            }
+        }
+    }
+
+    // Auto-hide check: AFTER processing events so cursor_inside is up-to-date
     if (osd->auto_show && osd->mode != OSD_MODE_HIDDEN && !osd->cursor_inside && osd->last_action_time_ms > 0) {
         long time_since_action = now - osd->last_action_time_ms;
         if (time_since_action > osd->display_duration_ms) {
             osd_hide(osd);
             return;
-        }
-    }
-
-    // Only process X11 events if visible
-    if (osd->mode == OSD_MODE_HIDDEN) return;
-
-    while (XPending(dpy)) {
-        XEvent event;
-        XNextEvent(dpy, &event);
-
-        switch (event.type) {
-            case Expose:
-                if (event.xexpose.count == 0) {
-                    osd_redraw(osd);
-                }
-                break;
-
-            case ButtonPress:
-                if (event.xbutton.button == Button1) {
-                    // Start dragging from anywhere on the window
-                    osd->dragging = 1;
-                    osd->drag_start_x = event.xbutton.x_root - osd->pos_x;
-                    osd->drag_start_y = event.xbutton.y_root - osd->pos_y;
-                }
-                break;
-
-            case ButtonRelease:
-                if (event.xbutton.button == Button1) {
-                    if (osd->dragging) {
-                        // If barely moved and clicked in title bar, toggle mode
-                        int dx = event.xbutton.x_root - osd->pos_x - osd->drag_start_x;
-                        int dy = event.xbutton.y_root - osd->pos_y - osd->drag_start_y;
-                        int title_height = osd->font_size + 12;
-                        if (abs(dx) < 5 && abs(dy) < 5 && event.xbutton.y < title_height) {
-                            osd_toggle_mode(osd);
-                        }
-                        osd->dragging = 0;
-                    }
-                }
-                break;
-
-            case MotionNotify:
-                if (osd->dragging) {
-                    // Consume all pending motion events (coalesce)
-                    while (XCheckTypedWindowEvent(dpy, win, MotionNotify, &event));
-
-                    osd->pos_x = event.xmotion.x_root - osd->drag_start_x;
-                    osd->pos_y = event.xmotion.y_root - osd->drag_start_y;
-                    XMoveWindow(dpy, win, osd->pos_x, osd->pos_y);
-                    XFlush(dpy);
-                }
-                break;
-
-            case ConfigureNotify:
-                // Window was moved or resized
-                break;
-
-            case EnterNotify:
-                // Cursor entered the window - don't auto-hide while hovering
-                osd->cursor_inside = 1;
-                break;
-
-            case LeaveNotify:
-                // Cursor left the window - restart auto-hide timer
-                osd->cursor_inside = 0;
-                osd->last_action_time_ms = osd_get_time_ms();
-                break;
         }
     }
 
