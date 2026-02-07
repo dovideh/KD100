@@ -2,7 +2,7 @@
 Originally forked from [mckset/KD100](https://github.com/mckset/KD100), now independently maintained with major enhancements.
 
 
-![KD100-OSD](OSD-full.png)
+![KD100-OSD](KD100-osd.gif)
 
 A simple driver for the Huion KD100 mini Keydial written in C to give the device some usability while waiting for Huion to fix their Linux drivers. Each button can be configured to either act as a key/multiple keys or to execute a program/command.
 
