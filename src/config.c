@@ -90,6 +90,7 @@ config_t* config_create(void) {
     // Initialize OSD settings
     config->osd.enabled = 0;
     config->osd.start_visible = 0;
+    config->osd.auto_show = 1;  // Auto-show on key press by default
     config->osd.pos_x = 50;
     config->osd.pos_y = 50;
     config->osd.opacity = 0.67f;  // 33% transparent = 67% opaque
@@ -291,6 +292,14 @@ int config_load(config_t* config, const char* filename, int debug) {
             while (*value == ' ') value++;
             config->osd.start_visible = (strncasecmp(value, "true", 4) == 0 || strcmp(value, "1") == 0);
             if (debug) printf("Config: osd_start_visible = %s\n", config->osd.start_visible ? "true" : "false");
+            continue;
+        }
+
+        if (strncasecmp(line, "osd_auto_show:", 14) == 0) {
+            char* value = line + 14;
+            while (*value == ' ') value++;
+            config->osd.auto_show = (strncasecmp(value, "true", 4) == 0 || strcmp(value, "1") == 0);
+            if (debug) printf("Config: osd_auto_show = %s\n", config->osd.auto_show ? "true" : "false");
             continue;
         }
 

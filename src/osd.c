@@ -85,6 +85,8 @@ osd_state_t* osd_create(config_t* config) {
     osd->opacity = 0.67f;  // 33% transparent = 67% opaque
     osd->display_duration_ms = 3000;  // Show actions for 3 seconds
     osd->font_size = 13;  // Default font size
+    osd->auto_show = 1;  // Auto-show on key press by default
+    osd->last_action_time_ms = 0;
     osd->recent_count = 0;
     osd->recent_head = 0;
     osd->config = config;
@@ -317,12 +319,16 @@ void osd_record_action(osd_state_t* osd, int button_index, const char* action) {
     if (osd->recent_actions[slot].action) free(osd->recent_actions[slot].action);
 
     // Store new action
+    long now = osd_get_time_ms();
     osd->recent_actions[slot].key_name = strdup(BUTTON_NAMES[button_index]);
     osd->recent_actions[slot].action = action ? strdup(action) : strdup("(unknown)");
-    osd->recent_actions[slot].timestamp_ms = osd_get_time_ms();
+    osd->recent_actions[slot].timestamp_ms = now;
+    osd->last_action_time_ms = now;
 
-    // Trigger redraw if visible
-    if (osd->mode != OSD_MODE_HIDDEN) {
+    // Auto-show OSD if hidden and auto_show is enabled
+    if (osd->mode == OSD_MODE_HIDDEN && osd->auto_show && osd->display != NULL) {
+        osd_set_mode(osd, OSD_MODE_MINIMAL);
+    } else if (osd->mode != OSD_MODE_HIDDEN) {
         osd_redraw(osd);
     }
 }
@@ -520,10 +526,23 @@ void osd_redraw(osd_state_t* osd) {
 
 // Process X11 events
 void osd_update(osd_state_t* osd) {
-    if (osd == NULL || osd->display == NULL || osd->mode == OSD_MODE_HIDDEN) return;
+    if (osd == NULL || osd->display == NULL) return;
 
     Display* dpy = (Display*)osd->display;
     Window win = (Window)osd->window;
+    long now = osd_get_time_ms();
+
+    // Auto-hide check: if auto_show is enabled, OSD is visible, and enough time passed
+    if (osd->auto_show && osd->mode != OSD_MODE_HIDDEN && osd->last_action_time_ms > 0) {
+        long time_since_action = now - osd->last_action_time_ms;
+        if (time_since_action > osd->display_duration_ms) {
+            osd_hide(osd);
+            return;
+        }
+    }
+
+    // Only process X11 events if visible
+    if (osd->mode == OSD_MODE_HIDDEN) return;
 
     while (XPending(dpy)) {
         XEvent event;
@@ -580,7 +599,6 @@ void osd_update(osd_state_t* osd) {
 
     // Check if we need to clear old actions and redraw
     static long last_cleanup = 0;
-    long now = osd_get_time_ms();
     if (now - last_cleanup > 500) {  // Check every 500ms
         last_cleanup = now;
 

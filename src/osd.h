@@ -32,6 +32,8 @@ typedef struct {
     float opacity;                // Background opacity (0.0-1.0)
     int display_duration_ms;      // How long to show key actions
     int font_size;                // Font size in pixels (default 13)
+    int auto_show;                // Auto-show OSD on key press
+    long last_action_time_ms;     // Time of last action (for auto-hide)
 
     // Recent actions buffer (circular)
     recent_action_t recent_actions[10];

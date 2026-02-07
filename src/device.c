@@ -61,6 +61,7 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
             osd->expanded_width = config->osd.expanded_width;
             osd->expanded_height = config->osd.expanded_height;
             osd->font_size = config->osd.font_size;
+            osd->auto_show = config->osd.auto_show;
 
             // Initialize X11 display
             if (osd_init_display(osd) == 0) {
@@ -355,8 +356,8 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                     unsigned char data[40];
                     int keycode = 0;
 
-                    // Update OSD (process X11 events)
-                    if (osd && osd->mode != OSD_MODE_HIDDEN) {
+                    // Update OSD (process X11 events and auto-hide timer)
+                    if (osd) {
                         osd_update(osd);
                     }
 

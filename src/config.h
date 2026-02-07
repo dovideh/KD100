@@ -19,6 +19,7 @@ typedef struct {
 typedef struct {
     int enabled;              // Is OSD enabled
     int start_visible;        // Show OSD on startup
+    int auto_show;            // Auto-show OSD when keys are pressed
     int pos_x;                // Initial X position
     int pos_y;                // Initial Y position
     float opacity;            // Background opacity (0.0-1.0, default 0.67 = 33% transparent)
