@@ -28,6 +28,7 @@ typedef struct {
     int expanded_width;       // Expanded mode width
     int expanded_height;      // Expanded mode height
     int osd_toggle_button;    // Button to toggle OSD (-1 = disabled)
+    int font_size;            // Font size in pixels (default 13)
 } osd_config_t;
 
 // Profile configuration (for referencing profile files)

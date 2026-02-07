@@ -31,6 +31,7 @@ typedef struct {
     int expanded_height;          // Expanded mode height
     float opacity;                // Background opacity (0.0-1.0)
     int display_duration_ms;      // How long to show key actions
+    int font_size;                // Font size in pixels (default 13)
 
     // Recent actions buffer (circular)
     recent_action_t recent_actions[10];
@@ -42,6 +43,7 @@ typedef struct {
     void* window;
     void* gc;
     void* visual;
+    void* font;                   // Current font
     int screen;
     int colormap;
 

@@ -84,10 +84,12 @@ osd_state_t* osd_create(config_t* config) {
     osd->height = osd->min_height;
     osd->opacity = 0.67f;  // 33% transparent = 67% opaque
     osd->display_duration_ms = 3000;  // Show actions for 3 seconds
+    osd->font_size = 13;  // Default font size
     osd->recent_count = 0;
     osd->recent_head = 0;
     osd->config = config;
     osd->dragging = 0;
+    osd->font = NULL;
 
     // Initialize key descriptions to NULL
     for (int i = 0; i < 19; i++) {
@@ -115,6 +117,9 @@ void osd_destroy(osd_state_t* osd) {
     // Close X11 resources
     if (osd->display) {
         Display* dpy = (Display*)osd->display;
+        if (osd->font) {
+            XFreeFont(dpy, (XFontStruct*)osd->font);
+        }
         if (osd->window) {
             XDestroyWindow(dpy, (Window)osd->window);
         }
@@ -190,10 +195,31 @@ int osd_init_display(osd_state_t* osd) {
     GC gc = XCreateGC(dpy, win, 0, NULL);
     osd->gc = gc;
 
+    // Load font based on font_size
+    char font_pattern[128];
+    snprintf(font_pattern, sizeof(font_pattern),
+             "-misc-fixed-medium-r-*-*-%d-*-*-*-*-*-*-*", osd->font_size);
+    XFontStruct* font = XLoadQueryFont(dpy, font_pattern);
+    if (font == NULL) {
+        // Try alternative pattern
+        snprintf(font_pattern, sizeof(font_pattern),
+                 "-*-fixed-medium-r-*-*-%d-*-*-*-*-*-*-*", osd->font_size);
+        font = XLoadQueryFont(dpy, font_pattern);
+    }
+    if (font == NULL) {
+        // Fallback to default fixed font
+        font = XLoadQueryFont(dpy, "fixed");
+    }
+    if (font != NULL) {
+        osd->font = font;
+        XSetFont(dpy, gc, font->fid);
+    }
+
     // Set window name
     XStoreName(dpy, win, "KD100 OSD");
 
-    printf("OSD: Display initialized (ARGB visual: %s)\n", depth == 32 ? "yes" : "no");
+    printf("OSD: Display initialized (ARGB visual: %s, font size: %d)\n",
+           depth == 32 ? "yes" : "no", osd->font_size);
     osd->enabled = 1;
 
     return 0;
@@ -326,32 +352,26 @@ void osd_redraw(osd_state_t* osd) {
     XSetForeground(dpy, gc, accent_color);
     XDrawRectangle(dpy, win, gc, 0, 0, osd->width - 1, osd->height - 1);
 
-    // Load font
-    XFontStruct* font = XLoadQueryFont(dpy, "-misc-fixed-medium-r-*-*-13-*-*-*-*-*-*-*");
-    if (font == NULL) {
-        font = XLoadQueryFont(dpy, "fixed");
-    }
+    // Use stored font (set in init)
+    XFontStruct* font = (XFontStruct*)osd->font;
     if (font) {
         XSetFont(dpy, gc, font->fid);
     }
 
-    int line_height = 16;
+    int line_height = osd->font_size + 3;
     int padding = 10;
+    int title_height = osd->font_size + 12;
     int y_offset = padding + line_height;
 
     // Draw title bar with mode indicator
     XSetForeground(dpy, gc, accent_color);
-    XFillRectangle(dpy, win, gc, 0, 0, osd->width, 25);
+    XFillRectangle(dpy, win, gc, 0, 0, osd->width, title_height);
 
     XSetForeground(dpy, gc, fg_color);
-    const char* title = (osd->mode == OSD_MODE_MINIMAL) ? "KD100 [+]" : "KD100 [-]";
-    XDrawString(dpy, win, gc, padding, 17, title, strlen(title));
+    const char* title = (osd->mode == OSD_MODE_MINIMAL) ? "KD100 [+] click to expand" : "KD100 [-] click to collapse";
+    XDrawString(dpy, win, gc, padding, title_height - 5, title, strlen(title));
 
-    // Draw drag hint
-    const char* hint = "drag to move";
-    XDrawString(dpy, win, gc, osd->width - 85, 17, hint, strlen(hint));
-
-    y_offset = 35;
+    y_offset = title_height + padding;
 
     if (osd->mode == OSD_MODE_MINIMAL) {
         // Minimal mode: show recent actions
@@ -522,24 +542,21 @@ void osd_update(osd_state_t* osd) {
 
             case ButtonPress:
                 if (event.xbutton.button == Button1) {
-                    // Check if click is in title bar (for dragging)
-                    if (event.xbutton.y < 25) {
-                        // Toggle mode on title bar click (except when starting drag)
-                        // Will be determined by button release
-                        osd->dragging = 1;
-                        osd->drag_start_x = event.xbutton.x_root - osd->pos_x;
-                        osd->drag_start_y = event.xbutton.y_root - osd->pos_y;
-                    }
+                    // Start dragging from anywhere on the window
+                    osd->dragging = 1;
+                    osd->drag_start_x = event.xbutton.x_root - osd->pos_x;
+                    osd->drag_start_y = event.xbutton.y_root - osd->pos_y;
                 }
                 break;
 
             case ButtonRelease:
                 if (event.xbutton.button == Button1) {
                     if (osd->dragging) {
-                        // If barely moved, treat as click to toggle
+                        // If barely moved and clicked in title bar, toggle mode
                         int dx = event.xbutton.x_root - osd->pos_x - osd->drag_start_x;
                         int dy = event.xbutton.y_root - osd->pos_y - osd->drag_start_y;
-                        if (abs(dx) < 5 && abs(dy) < 5) {
+                        int title_height = osd->font_size + 12;
+                        if (abs(dx) < 5 && abs(dy) < 5 && event.xbutton.y < title_height) {
                             osd_toggle_mode(osd);
                         }
                         osd->dragging = 0;

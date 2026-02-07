@@ -60,6 +60,7 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
             osd->min_height = config->osd.min_height;
             osd->expanded_width = config->osd.expanded_width;
             osd->expanded_height = config->osd.expanded_height;
+            osd->font_size = config->osd.font_size;
 
             // Initialize X11 display
             if (osd_init_display(osd) == 0) {

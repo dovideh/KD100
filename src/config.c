@@ -99,6 +99,7 @@ config_t* config_create(void) {
     config->osd.expanded_width = 400;
     config->osd.expanded_height = 350;
     config->osd.osd_toggle_button = -1;  // Disabled by default
+    config->osd.font_size = 13;  // Default font size
 
     // Initialize profile settings
     config->profile.profiles_file = NULL;
@@ -347,6 +348,16 @@ int config_load(config_t* config, const char* filename, int debug) {
             continue;
         }
 
+        if (strncasecmp(line, "osd_font_size:", 14) == 0) {
+            char* value = line + 14;
+            while (*value == ' ') value++;
+            config->osd.font_size = atoi(value);
+            if (config->osd.font_size < 8) config->osd.font_size = 8;
+            if (config->osd.font_size > 32) config->osd.font_size = 32;
+            if (debug) printf("Config: osd_font_size = %d\n", config->osd.font_size);
+            continue;
+        }
+
         // Parse profile settings
         if (strncasecmp(line, "profiles_file:", 14) == 0) {
             char* value = line + 14;
@@ -579,6 +590,7 @@ void config_print(const config_t* config, int debug) {
     printf("Min size: %dx%d\n", config->osd.min_width, config->osd.min_height);
     printf("Expanded size: %dx%d\n", config->osd.expanded_width, config->osd.expanded_height);
     printf("Toggle button: %d\n", config->osd.osd_toggle_button);
+    printf("Font size: %d\n", config->osd.font_size);
 
     printf("\n=== Profile Configuration ===\n");
     printf("Profiles file: %s\n", config->profile.profiles_file ? config->profile.profiles_file : "(none)");
