@@ -156,7 +156,7 @@ int osd_init_display(osd_state_t* osd) {
     attrs.background_pixel = 0;  // Transparent background
     attrs.border_pixel = 0;
     attrs.event_mask = ExposureMask | ButtonPressMask | ButtonReleaseMask |
-                       PointerMotionMask | StructureNotifyMask;
+                       PointerMotionMask | ButtonMotionMask | StructureNotifyMask;
 
     // Create the window
     Window win = XCreateWindow(dpy, RootWindow(dpy, osd->screen),
@@ -549,9 +549,13 @@ void osd_update(osd_state_t* osd) {
 
             case MotionNotify:
                 if (osd->dragging) {
+                    // Consume all pending motion events (coalesce)
+                    while (XCheckTypedWindowEvent(dpy, win, MotionNotify, &event));
+
                     osd->pos_x = event.xmotion.x_root - osd->drag_start_x;
                     osd->pos_y = event.xmotion.y_root - osd->drag_start_y;
                     XMoveWindow(dpy, win, osd->pos_x, osd->pos_y);
+                    XFlush(dpy);
                 }
                 break;
 

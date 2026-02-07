@@ -26,6 +26,25 @@ static wheel_mode_t parse_wheel_mode(const char* mode_str) {
     return WHEEL_MODE_SEQUENTIAL;
 }
 
+// Helper function to strip inline comments (// ...) and trailing whitespace
+static char* strip_inline_comment(char* str) {
+    if (str == NULL) return NULL;
+
+    // Find // and terminate string there
+    char* comment = strstr(str, "//");
+    if (comment != NULL) {
+        *comment = '\0';
+    }
+
+    // Strip trailing whitespace
+    size_t len = strlen(str);
+    while (len > 0 && (str[len-1] == ' ' || str[len-1] == '\t' || str[len-1] == '\n' || str[len-1] == '\r')) {
+        str[--len] = '\0';
+    }
+
+    return str;
+}
+
 // Create a new configuration structure
 config_t* config_create(void) {
     config_t* config = malloc(sizeof(config_t));
@@ -424,7 +443,11 @@ int config_load(config_t* config, const char* filename, int debug) {
             char* func_str = line + 9;
             while (*func_str == ' ') func_str++;
 
+            // Strip inline comments and trailing whitespace
             char* func_copy = strdup(func_str);
+            if (func_copy != NULL) {
+                strip_inline_comment(func_copy);
+            }
             if (func_copy == NULL) {
                 printf("Memory allocation failed!\n");
                 fclose(f);
