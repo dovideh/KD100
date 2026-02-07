@@ -7,7 +7,7 @@ DIR = $(shell pwd)
 HOME = "/home/"$(shell logname)
 TARGET = KD100
 DEBUG_TARGET = KD100-debug
-VERSION = 1.6.0
+VERSION = 1.7.0
 
 # Source files
 SRC_DIR = src
@@ -149,9 +149,10 @@ help:
 	@echo "  make help         - Show this help"
 	@echo ""
 	@echo "New in v$(VERSION):"
-	@echo "  - On-screen display (OSD) for key actions"
-	@echo "  - Profile system with window title matching"
-	@echo "  - Requires: libx11-dev libxrender-dev libxext-dev"
+	@echo "  - Wheel function descriptions (wheel_description_N config fields)"
+	@echo "  - Active button highlighting and leader key visual feedback"
+	@echo "  - Wheel set indicator with active set highlight"
+	@echo "  - Wheel action aggregation and mode/leader status display"
 
 # Version info
 version:
