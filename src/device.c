@@ -72,6 +72,21 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                     }
                 }
 
+                // Load wheel descriptions from config
+                for (int i = 0; i < config->totalWheels && i < 32; i++) {
+                    if (config->wheelEvents[i].description) {
+                        osd_set_wheel_description(osd, i, config->wheelEvents[i].description);
+                    }
+                }
+
+                // Set initial wheel state
+                osd_set_wheel_state(osd, 0, 0, 0,
+                                     config->wheel_mode == WHEEL_MODE_SETS ? 1 : 0,
+                                     config->totalWheels);
+
+                // Set leader button info
+                osd_set_leader_state(osd, 0, config->leader.leader_button);
+
                 // Show OSD if start_visible is set
                 if (config->osd.start_visible) {
                     osd_show(osd);
@@ -473,6 +488,28 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                                     printf("Function: (not defined - incomplete set)\n");
                                 }
                             }
+
+                            // Update OSD wheel state
+                            if (osd) {
+                                osd_set_wheel_state(osd, wheel_current_set, wheel_position_in_set,
+                                                     wheelFunction, 1, config->totalWheels);
+
+                                // Record set change as an action with description
+                                const char* set_desc = NULL;
+                                if (wheelFunction >= 0 && wheelFunction < config->totalWheels &&
+                                    config->wheelEvents[wheelFunction].description) {
+                                    set_desc = config->wheelEvents[wheelFunction].description;
+                                }
+                                char set_action[128];
+                                if (set_desc) {
+                                    snprintf(set_action, sizeof(set_action), "Set %d: %s",
+                                             wheel_current_set + 1, set_desc);
+                                } else {
+                                    snprintf(set_action, sizeof(set_action), "Set %d",
+                                             wheel_current_set + 1);
+                                }
+                                osd_record_action(osd, 18, set_action);
+                            }
                         }
                     }
 
@@ -497,11 +534,21 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                         if (wheelFunction >= 0 && wheelFunction < config->totalWheels &&
                             config->wheelEvents[wheelFunction].right != NULL) {
                             Handler(config->wheelEvents[wheelFunction].right, -1, debug);
+                            // Record aggregated wheel action to OSD
+                            if (osd) {
+                                const char* desc = config->wheelEvents[wheelFunction].description;
+                                osd_record_wheel_action(osd, "increase", desc);
+                            }
                         }
                     } else if (keycode == 642) {
                         if (wheelFunction >= 0 && wheelFunction < config->totalWheels &&
                             config->wheelEvents[wheelFunction].left != NULL) {
                             Handler(config->wheelEvents[wheelFunction].left, -1, debug);
+                            // Record aggregated wheel action to OSD
+                            if (osd) {
+                                const char* desc = config->wheelEvents[wheelFunction].description;
+                                osd_record_wheel_action(osd, "decrease", desc);
+                            }
                         }
                     } else {
                         int button_index = find_button_index(keycode);
@@ -515,6 +562,11 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                                 }
                             }
 
+                            // Set active button highlight on OSD
+                            if (osd) {
+                                osd_set_active_button(osd, button_index);
+                            }
+
                             // Record action to OSD
                             if (osd && active_config && button_index < active_config->totalButtons) {
                                 const char* action = active_config->events[button_index].function;
@@ -525,6 +577,14 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
 
                             // Process button press with leader system
                             process_leader_combination(&active_config->leader, active_config->events, button_index, debug);
+
+                            // Update leader state on OSD
+                            if (osd) {
+                                int leader_is_active = active_config->leader.leader_active ||
+                                                       active_config->leader.toggle_state;
+                                osd_set_leader_state(osd, leader_is_active,
+                                                      active_config->leader.leader_button);
+                            }
 
                             // Also handle legacy single-button events for compatibility
                             if (active_config->events[button_index].function != NULL) {
@@ -548,6 +608,19 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                                             printf("Function: %s | %s\n",
                                                    config->wheelEvents[wheelFunction].left ? config->wheelEvents[wheelFunction].left : "(null)",
                                                    config->wheelEvents[wheelFunction].right ? config->wheelEvents[wheelFunction].right : "(null)");
+                                        }
+                                        // Update OSD
+                                        if (osd) {
+                                            osd_set_wheel_state(osd, 0, 0, wheelFunction, 0, config->totalWheels);
+                                            const char* desc = (wheelFunction >= 0 && wheelFunction < config->totalWheels) ?
+                                                                config->wheelEvents[wheelFunction].description : NULL;
+                                            char seq_action[128];
+                                            if (desc) {
+                                                snprintf(seq_action, sizeof(seq_action), "Swap to: %s", desc);
+                                            } else {
+                                                snprintf(seq_action, sizeof(seq_action), "Swap to: Fn %d", wheelFunction);
+                                            }
+                                            osd_record_action(osd, 18, seq_action);
                                         }
                                     } else {
                                         // Sets mode: multi-click detection for set-based navigation

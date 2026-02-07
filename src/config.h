@@ -9,10 +9,14 @@ typedef enum {
     WHEEL_MODE_SETS         // Multi-click for set-based navigation
 } wheel_mode_t;
 
+// Maximum length for description fields (prevents buffer overflow)
+#define MAX_DESCRIPTION_LEN 64
+
 // Wheel event structure
 typedef struct {
     char* right;
     char* left;
+    char* description;  // Human-readable name for this wheel function pair (e.g., "Brush Size")
 } wheel;
 
 // OSD configuration
