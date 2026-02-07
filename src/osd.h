@@ -12,6 +12,7 @@ typedef enum {
 
 // Recent key action for display
 typedef struct {
+    int button_index;     // Button index (0-18) for looking up description
     char* key_name;       // Display name of the key
     char* action;         // What action was performed
     long timestamp_ms;    // When it was pressed

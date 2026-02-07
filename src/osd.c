@@ -323,6 +323,7 @@ void osd_record_action(osd_state_t* osd, int button_index, const char* action) {
 
     // Store new action
     long now = osd_get_time_ms();
+    osd->recent_actions[slot].button_index = button_index;
     osd->recent_actions[slot].key_name = strdup(BUTTON_NAMES[button_index]);
     osd->recent_actions[slot].action = action ? strdup(action) : strdup("(unknown)");
     osd->recent_actions[slot].timestamp_ms = now;
@@ -400,9 +401,14 @@ void osd_redraw(osd_state_t* osd) {
             long age = now - action->timestamp_ms;
             if (age > osd->display_duration_ms && osd->display_duration_ms > 0) continue;
 
-            // Format: "B0: ctrl+z"
+            // Format: "B0 - Brush (b)" or "B0 - (b)" if no description
             char line[128];
-            snprintf(line, sizeof(line), "%s: %s", action->key_name, action->action);
+            const char* desc = osd->key_descriptions[action->button_index];
+            if (desc && strlen(desc) > 0) {
+                snprintf(line, sizeof(line), "%s - %s (%s)", action->key_name, desc, action->action);
+            } else {
+                snprintf(line, sizeof(line), "%s - (%s)", action->key_name, action->action);
+            }
 
             // Fade out effect based on age
             if (age < osd->display_duration_ms) {
