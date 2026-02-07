@@ -326,10 +326,12 @@ void osd_set_mode(osd_state_t* osd, osd_mode_t mode) {
 
     // Update window size based on mode (dynamically calculated from font size)
     if (mode == OSD_MODE_MINIMAL) {
-        // Minimal: title + mode/set line + function pair line + "Recent Actions:" header + 3 actions + padding
+        // Minimal: title + mode/set line + (optional leader line) + function pair line
+        //        + "Recent Actions:" header + 3 actions + padding
         osd->width = (int)(260 * scale);
         osd->height = title_height + padding
                      + line_height + (int)(3 * scale)   // mode + set indicator line
+                     + line_height + (int)(3 * scale)   // leader line (always reserve space)
                      + line_height + (int)(3 * scale)   // function pair line
                      + line_height + (int)(5 * scale)   // "Recent Actions:" header
                      + (3 * line_height)                 // 3 action lines
@@ -340,13 +342,14 @@ void osd_set_mode(osd_state_t* osd, osd_mode_t mode) {
         int key_height = (int)(45 * scale);
         int grid_padding = (int)(5 * scale);
         int grid_width = 4 * key_width + 3 * grid_padding;
-        // Height: title + mode/set line + function pair + grid + history + padding
+        // Height: title + mode/set line + leader line + function pair + grid + history + padding
         int wheel_height = key_height - (int)(10 * scale);
         int grid_height = wheel_height + 5 * (key_height + grid_padding) + grid_padding;
         int history_height = line_height + (int)(5 * scale) + 3 * line_height;  // header + 3 actions
         osd->width = grid_width + 2 * padding;
         osd->height = title_height + padding
                      + line_height + (int)(3 * scale)   // mode + set indicator line
+                     + line_height + (int)(3 * scale)   // leader line (always reserve space)
                      + line_height + (int)(8 * scale)   // function pair line
                      + grid_height
                      + history_height + padding;
@@ -594,29 +597,23 @@ void osd_redraw(osd_state_t* osd) {
 
     int y_offset = title_height + padding;
 
-    // ========== COMMON: Mode line + wheel set indicator + function pair ==========
+    // ========== COMMON: Mode line + wheel set indicator + leader + function pair ==========
     // This block is shared between minimal and expanded to keep wheel info at top
 
-    // -- Mode line with wheel set boxes inline --
+    // -- Line 1: Mode + wheel set boxes (no leader text here) --
     {
         char mode_text[64];
         const char* mode_str = osd->wheel.wheel_mode ? "Sets" : "Sequential";
-        if (osd->leader_active) {
-            snprintf(mode_text, sizeof(mode_text), "Mode: %s | Leader: ON", mode_str);
-        } else {
-            snprintf(mode_text, sizeof(mode_text), "Mode: %s", mode_str);
-        }
+        snprintf(mode_text, sizeof(mode_text), "Mode: %s", mode_str);
         XSetForeground(dpy, gc, dim_color);
         XDrawString(dpy, win, gc, padding, y_offset, mode_text, strlen(mode_text));
 
         // Draw wheel set boxes inline after the mode text
+        int text_w = (int)(strlen(mode_text) * osd->font_size * 0.6f) + (int)(10 * scale);
         if (osd->wheel.wheel_mode == 1) {
-            // Estimate text width (~0.6 * font_size per char)
-            int text_w = (int)(strlen(mode_text) * osd->font_size * 0.6f) + (int)(10 * scale);
             draw_wheel_set_indicator(dpy, win, gc, osd, padding + text_w, y_offset - (int)(12 * scale), scale);
         } else {
             // Sequential mode: draw grayed-out set boxes
-            int text_w = (int)(strlen(mode_text) * osd->font_size * 0.6f) + (int)(10 * scale);
             int box_w = (int)(30 * scale);
             int box_h = (int)(18 * scale);
             int box_gap = (int)(8 * scale);
@@ -636,6 +633,21 @@ void osd_redraw(osd_state_t* osd) {
                 XSetForeground(dpy, gc, ((unsigned long)120 << 24) | 0x888888);
                 XDrawString(dpy, win, gc, bx + (int)(11 * scale), by + (int)(13 * scale), label, strlen(label));
             }
+        }
+        y_offset += line_height + (int)(3 * scale);
+    }
+
+    // -- Line 2: Leader state (always occupies a row for stable layout) --
+    {
+        if (osd->leader_active) {
+            unsigned long leader_on_color = ((unsigned long)255 << 24) | 0xEEAA33;
+            XSetForeground(dpy, gc, leader_on_color);
+            const char* leader_text = "Leader: ON";
+            XDrawString(dpy, win, gc, padding, y_offset, leader_text, strlen(leader_text));
+        } else {
+            XSetForeground(dpy, gc, ((unsigned long)120 << 24) | 0x666666);
+            const char* leader_text = "Leader: OFF";
+            XDrawString(dpy, win, gc, padding, y_offset, leader_text, strlen(leader_text));
         }
         y_offset += line_height + (int)(3 * scale);
     }
