@@ -326,25 +326,30 @@ void osd_set_mode(osd_state_t* osd, osd_mode_t mode) {
 
     // Update window size based on mode (dynamically calculated from font size)
     if (mode == OSD_MODE_MINIMAL) {
-        // Minimal: title + mode indicator + wheel info + 3 action lines + padding
-        osd->width = (int)(250 * scale);
-        osd->height = title_height + padding + line_height + (int)(5 * scale)
-                     + line_height + (int)(5 * scale)  // wheel set + direction info
-                     + (3 * line_height) + padding;
+        // Minimal: title + mode/set line + function pair line + "Recent Actions:" header + 3 actions + padding
+        osd->width = (int)(260 * scale);
+        osd->height = title_height + padding
+                     + line_height + (int)(3 * scale)   // mode + set indicator line
+                     + line_height + (int)(3 * scale)   // function pair line
+                     + line_height + (int)(5 * scale)   // "Recent Actions:" header
+                     + (3 * line_height)                 // 3 action lines
+                     + padding;
     } else {
         // Expanded: calculate based on grid dimensions
         int key_width = (int)(85 * scale);
         int key_height = (int)(45 * scale);
         int grid_padding = (int)(5 * scale);
         int grid_width = 4 * key_width + 3 * grid_padding;
-        // Height: title + mode line + keyboard layout + grid + wheel info + recent actions + padding
+        // Height: title + mode/set line + function pair + grid + history + padding
         int wheel_height = key_height - (int)(10 * scale);
         int grid_height = wheel_height + 5 * (key_height + grid_padding) + grid_padding;
-        int wheel_info_height = 3 * line_height + (int)(10 * scale);  // set indicator + direction
         int history_height = line_height + (int)(5 * scale) + 3 * line_height;  // header + 3 actions
         osd->width = grid_width + 2 * padding;
-        osd->height = title_height + padding + line_height + (int)(10 * scale)
-                     + grid_height + wheel_info_height + history_height + padding;
+        osd->height = title_height + padding
+                     + line_height + (int)(3 * scale)   // mode + set indicator line
+                     + line_height + (int)(8 * scale)   // function pair line
+                     + grid_height
+                     + history_height + padding;
     }
 
     XResizeWindow(dpy, win, osd->width, osd->height);
@@ -589,95 +594,110 @@ void osd_redraw(osd_state_t* osd) {
 
     int y_offset = title_height + padding;
 
-    if (osd->mode == OSD_MODE_MINIMAL) {
-        // -- Mode indicator line --
-        char mode_line[128];
+    // ========== COMMON: Mode line + wheel set indicator + function pair ==========
+    // This block is shared between minimal and expanded to keep wheel info at top
+
+    // -- Mode line with wheel set boxes inline --
+    {
+        char mode_text[64];
         const char* mode_str = osd->wheel.wheel_mode ? "Sets" : "Sequential";
         if (osd->leader_active) {
-            snprintf(mode_line, sizeof(mode_line), "Mode: %s | Leader: ON", mode_str);
+            snprintf(mode_text, sizeof(mode_text), "Mode: %s | Leader: ON", mode_str);
         } else {
-            snprintf(mode_line, sizeof(mode_line), "Mode: %s", mode_str);
+            snprintf(mode_text, sizeof(mode_text), "Mode: %s", mode_str);
         }
         XSetForeground(dpy, gc, dim_color);
-        XDrawString(dpy, win, gc, padding, y_offset, mode_line, strlen(mode_line));
-        y_offset += line_height + (int)(3 * scale);
+        XDrawString(dpy, win, gc, padding, y_offset, mode_text, strlen(mode_text));
 
-        // -- Wheel set + direction info --
+        // Draw wheel set boxes inline after the mode text
         if (osd->wheel.wheel_mode == 1) {
-            // Sets mode: show current set and direction labels
-            int func_idx = osd->wheel.wheel_function;
-            const char* func_desc = NULL;
-            if (func_idx >= 0 && func_idx < 32) {
-                func_desc = osd->wheel.descriptions[func_idx];
+            // Estimate text width (~0.6 * font_size per char)
+            int text_w = (int)(strlen(mode_text) * osd->font_size * 0.6f) + (int)(10 * scale);
+            draw_wheel_set_indicator(dpy, win, gc, osd, padding + text_w, y_offset - (int)(12 * scale), scale);
+        } else {
+            // Sequential mode: draw grayed-out set boxes
+            int text_w = (int)(strlen(mode_text) * osd->font_size * 0.6f) + (int)(10 * scale);
+            int box_w = (int)(30 * scale);
+            int box_h = (int)(18 * scale);
+            int box_gap = (int)(8 * scale);
+            unsigned long grayed = ((unsigned long)100 << 24) | 0x444444;
+            int num_sets = (osd->wheel.total_wheels + 1) / 2;
+            if (num_sets < 1) num_sets = 1;
+            if (num_sets > 3) num_sets = 3;
+            for (int i = 0; i < num_sets; i++) {
+                int bx = padding + text_w + i * (box_w + box_gap);
+                int by = y_offset - (int)(12 * scale);
+                XSetForeground(dpy, gc, grayed);
+                XFillRectangle(dpy, win, gc, bx, by, box_w, box_h);
+                XSetForeground(dpy, gc, ((unsigned long)120 << 24) | 0x666666);
+                XDrawRectangle(dpy, win, gc, bx, by, box_w - 1, box_h - 1);
+                char label[16];
+                snprintf(label, sizeof(label), "%d", i + 1);
+                XSetForeground(dpy, gc, ((unsigned long)120 << 24) | 0x888888);
+                XDrawString(dpy, win, gc, bx + (int)(11 * scale), by + (int)(13 * scale), label, strlen(label));
             }
+        }
+        y_offset += line_height + (int)(3 * scale);
+    }
 
-            char wheel_line[128];
-            if (func_desc) {
-                snprintf(wheel_line, sizeof(wheel_line), "Set %d: %s",
-                         osd->wheel.current_set + 1, func_desc);
-            } else {
-                snprintf(wheel_line, sizeof(wheel_line), "Set %d: Fn %d",
-                         osd->wheel.current_set + 1, func_idx);
-            }
-            XSetForeground(dpy, gc, accent_color);
-            XDrawString(dpy, win, gc, padding, y_offset, wheel_line, strlen(wheel_line));
+    // -- Function pair line: show which function is active in current set --
+    {
+        int pair_idx = osd->wheel.current_set * 2;
+        int pos = osd->wheel.position_in_set;
 
-            // Show both functions in the set
-            int pair_idx = osd->wheel.current_set * 2;
+        if (osd->wheel.wheel_mode == 1) {
+            // Sets mode: show both functions in the pair with > on active
             const char* desc_a = (pair_idx < 32) ? osd->wheel.descriptions[pair_idx] : NULL;
             const char* desc_b = (pair_idx + 1 < 32) ? osd->wheel.descriptions[pair_idx + 1] : NULL;
-            if (desc_a || desc_b) {
-                y_offset += line_height;
-                char pair_line[128];
-                snprintf(pair_line, sizeof(pair_line), "  L: %s | R: %s",
-                         desc_a ? desc_a : "---", desc_b ? desc_b : "---");
-                XSetForeground(dpy, gc, dim_color);
-                XDrawString(dpy, win, gc, padding, y_offset, pair_line, strlen(pair_line));
-            }
+            char fn_a[48], fn_b[48];
+            snprintf(fn_a, sizeof(fn_a), "%s", desc_a ? desc_a : "Fn 0");
+            snprintf(fn_b, sizeof(fn_b), "%s", desc_b ? desc_b : "Fn 1");
+
+            char pair_line[128];
+            snprintf(pair_line, sizeof(pair_line), "Set %d:  %s%s  |  %s%s",
+                     osd->wheel.current_set + 1,
+                     pos == 0 ? "> " : "  ", fn_a,
+                     pos == 1 ? "> " : "  ", fn_b);
+            XSetForeground(dpy, gc, accent_color);
+            XDrawString(dpy, win, gc, padding, y_offset, pair_line, strlen(pair_line));
         } else {
             // Sequential mode: show current wheel function
             int func_idx = osd->wheel.wheel_function;
             const char* func_desc = (func_idx >= 0 && func_idx < 32) ?
                                      osd->wheel.descriptions[func_idx] : NULL;
-            char wheel_line[128];
+            char seq_line[128];
             if (func_desc) {
-                snprintf(wheel_line, sizeof(wheel_line), "Wheel: %s (Fn %d)", func_desc, func_idx);
+                snprintf(seq_line, sizeof(seq_line), "Wheel: %s (Fn %d/%d)",
+                         func_desc, func_idx + 1, osd->wheel.total_wheels);
             } else {
-                snprintf(wheel_line, sizeof(wheel_line), "Wheel: Fn %d", func_idx);
+                snprintf(seq_line, sizeof(seq_line), "Wheel: Fn %d/%d",
+                         func_idx + 1, osd->wheel.total_wheels);
             }
             XSetForeground(dpy, gc, accent_color);
-            XDrawString(dpy, win, gc, padding, y_offset, wheel_line, strlen(wheel_line));
+            XDrawString(dpy, win, gc, padding, y_offset, seq_line, strlen(seq_line));
         }
-        y_offset += line_height + (int)(5 * scale);
+        y_offset += line_height + (int)(3 * scale);
+    }
+
+    if (osd->mode == OSD_MODE_MINIMAL) {
+        // ========== MINIMAL MODE ==========
 
         // -- Recent Actions --
         XSetForeground(dpy, gc, fg_color);
         XDrawString(dpy, win, gc, padding, y_offset, "Recent Actions:", 15);
-        y_offset += line_height + (int)(3 * scale);
+        y_offset += line_height + (int)(5 * scale);
 
         draw_recent_actions(dpy, win, gc, osd, padding, y_offset, 3, scale);
 
     } else {
         // ========== EXPANDED MODE ==========
 
-        // -- Mode indicator line --
-        char mode_line[128];
-        const char* mode_str = osd->wheel.wheel_mode ? "Sets" : "Sequential";
-        if (osd->leader_active) {
-            snprintf(mode_line, sizeof(mode_line), "Mode: %s | Leader: ON", mode_str);
-        } else {
-            snprintf(mode_line, sizeof(mode_line), "Mode: %s", mode_str);
-        }
-        XSetForeground(dpy, gc, dim_color);
-        XDrawString(dpy, win, gc, padding, y_offset, mode_line, strlen(mode_line));
-        y_offset += line_height + (int)(10 * scale);
-
         // -- Keyboard grid --
         int key_width = (int)(85 * scale);
         int key_height = (int)(45 * scale);
         int grid_padding = (int)(5 * scale);
         int start_x = padding;
-        int start_y = y_offset;
+        int start_y = y_offset + (int)(5 * scale);
         int grid_width = 4 * key_width + 3 * grid_padding;
         int wheel_height = key_height - (int)(10 * scale);
 
@@ -727,76 +747,6 @@ void osd_redraw(osd_state_t* osd) {
         draw_button_key(dpy, win, gc, osd, 17, x17, bottom_y, key_width, key_height, scale);
 
         y_offset = bottom_y + key_height + (int)(10 * scale);
-
-        // -- Wheel Set Indicator --
-        XSetForeground(dpy, gc, fg_color);
-        const char* wheel_label = "Wheel Sets:";
-        XDrawString(dpy, win, gc, padding, y_offset, wheel_label, strlen(wheel_label));
-
-        // Draw set boxes next to label
-        int label_width = (int)(80 * scale);
-        draw_wheel_set_indicator(dpy, win, gc, osd, padding + label_width, y_offset - (int)(12 * scale), scale);
-        y_offset += line_height + (int)(3 * scale);
-
-        // -- Wheel direction labels for current set --
-        if (osd->wheel.wheel_mode == 1) {
-            int pair_idx = osd->wheel.current_set * 2;
-            const char* desc_a = (pair_idx < 32) ? osd->wheel.descriptions[pair_idx] : NULL;
-            const char* desc_b = (pair_idx + 1 < 32) ? osd->wheel.descriptions[pair_idx + 1] : NULL;
-
-            char dir_line[128];
-            // Position 0 = active highlighted
-            int pos = osd->wheel.position_in_set;
-            if (desc_a && desc_b) {
-                snprintf(dir_line, sizeof(dir_line), "%s%s  |  %s%s",
-                         pos == 0 ? "> " : "  ", desc_a,
-                         pos == 1 ? "> " : "  ", desc_b);
-            } else if (desc_a) {
-                snprintf(dir_line, sizeof(dir_line), "%s%s  |  ---",
-                         pos == 0 ? "> " : "  ", desc_a);
-            } else if (desc_b) {
-                snprintf(dir_line, sizeof(dir_line), "---  |  %s%s",
-                         pos == 1 ? "> " : "  ", desc_b);
-            } else {
-                snprintf(dir_line, sizeof(dir_line), "Fn %d  |  Fn %d", pair_idx, pair_idx + 1);
-            }
-            XSetForeground(dpy, gc, accent_color);
-            XDrawString(dpy, win, gc, padding, y_offset, dir_line, strlen(dir_line));
-            y_offset += line_height;
-
-            // Show last wheel action (aggregated)
-            if (osd->wheel.last_wheel_action && (now - osd->wheel.last_wheel_time_ms) < osd->display_duration_ms) {
-                XSetForeground(dpy, gc, dim_color);
-                XDrawString(dpy, win, gc, padding, y_offset,
-                            osd->wheel.last_wheel_action, strlen(osd->wheel.last_wheel_action));
-            }
-            y_offset += line_height;
-        } else {
-            // Sequential mode
-            int func_idx = osd->wheel.wheel_function;
-            const char* func_desc = (func_idx >= 0 && func_idx < 32) ?
-                                     osd->wheel.descriptions[func_idx] : NULL;
-            char seq_line[128];
-            if (func_desc) {
-                snprintf(seq_line, sizeof(seq_line), "Active: %s (Fn %d/%d)",
-                         func_desc, func_idx, osd->wheel.total_wheels);
-            } else {
-                snprintf(seq_line, sizeof(seq_line), "Active: Fn %d/%d",
-                         func_idx, osd->wheel.total_wheels);
-            }
-            XSetForeground(dpy, gc, accent_color);
-            XDrawString(dpy, win, gc, padding, y_offset, seq_line, strlen(seq_line));
-            y_offset += line_height;
-
-            if (osd->wheel.last_wheel_action && (now - osd->wheel.last_wheel_time_ms) < osd->display_duration_ms) {
-                XSetForeground(dpy, gc, dim_color);
-                XDrawString(dpy, win, gc, padding, y_offset,
-                            osd->wheel.last_wheel_action, strlen(osd->wheel.last_wheel_action));
-            }
-            y_offset += line_height;
-        }
-
-        y_offset += (int)(5 * scale);
 
         // -- Recent Actions (3 items in expanded view too) --
         XSetForeground(dpy, gc, fg_color);
