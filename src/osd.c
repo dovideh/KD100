@@ -78,7 +78,7 @@ osd_state_t* osd_create(config_t* config) {
     osd->pos_y = 50;
     osd->min_width = 200;
     osd->min_height = 100;
-    osd->expanded_width = 400;
+    osd->expanded_width = 375;
     osd->expanded_height = 380;
     osd->width = osd->min_width;
     osd->height = osd->min_height;
@@ -435,12 +435,15 @@ void osd_redraw(osd_state_t* osd) {
         int start_x = padding;
         int start_y = y_offset;
 
-        // Draw wheel button (top, spanning)
+        // Calculate grid width (4 columns)
+        int grid_width = 4 * key_width + 3 * grid_padding;
+
+        // Draw wheel button (top, spanning same width as grid)
         int wheel_y = start_y;
         XSetForeground(dpy, gc, highlight_color);
-        XFillRectangle(dpy, win, gc, start_x, wheel_y, osd->width - 2 * padding, key_height - 10);
+        XFillRectangle(dpy, win, gc, start_x, wheel_y, grid_width, key_height - 10);
         XSetForeground(dpy, gc, fg_color);
-        XDrawRectangle(dpy, win, gc, start_x, wheel_y, osd->width - 2 * padding - 1, key_height - 11);
+        XDrawRectangle(dpy, win, gc, start_x, wheel_y, grid_width - 1, key_height - 11);
 
         // Wheel button label
         const char* wheel_desc = osd->key_descriptions[18] ? osd->key_descriptions[18] : "Wheel Toggle";
