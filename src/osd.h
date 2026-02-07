@@ -53,6 +53,7 @@ typedef struct {
     int dragging;
     int drag_start_x;
     int drag_start_y;
+    int cursor_inside;            // Is cursor hovering over window
 
     // Configuration reference for key names
     config_t* config;

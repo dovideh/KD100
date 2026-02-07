@@ -91,6 +91,7 @@ osd_state_t* osd_create(config_t* config) {
     osd->recent_head = 0;
     osd->config = config;
     osd->dragging = 0;
+    osd->cursor_inside = 0;
     osd->font = NULL;
 
     // Initialize key descriptions to NULL
@@ -163,7 +164,8 @@ int osd_init_display(osd_state_t* osd) {
     attrs.background_pixel = 0;  // Transparent background
     attrs.border_pixel = 0;
     attrs.event_mask = ExposureMask | ButtonPressMask | ButtonReleaseMask |
-                       PointerMotionMask | ButtonMotionMask | StructureNotifyMask;
+                       PointerMotionMask | ButtonMotionMask | StructureNotifyMask |
+                       EnterWindowMask | LeaveWindowMask;
 
     // Create the window
     Window win = XCreateWindow(dpy, RootWindow(dpy, osd->screen),
@@ -533,8 +535,8 @@ void osd_update(osd_state_t* osd) {
     Window win = (Window)osd->window;
     long now = osd_get_time_ms();
 
-    // Auto-hide check: if auto_show is enabled, OSD is visible, and enough time passed
-    if (osd->auto_show && osd->mode != OSD_MODE_HIDDEN && osd->last_action_time_ms > 0) {
+    // Auto-hide check: if auto_show is enabled, OSD is visible, cursor is outside, and enough time passed
+    if (osd->auto_show && osd->mode != OSD_MODE_HIDDEN && !osd->cursor_inside && osd->last_action_time_ms > 0) {
         long time_since_action = now - osd->last_action_time_ms;
         if (time_since_action > osd->display_duration_ms) {
             osd_hide(osd);
@@ -594,6 +596,17 @@ void osd_update(osd_state_t* osd) {
 
             case ConfigureNotify:
                 // Window was moved or resized
+                break;
+
+            case EnterNotify:
+                // Cursor entered the window - don't auto-hide while hovering
+                osd->cursor_inside = 1;
+                break;
+
+            case LeaveNotify:
+                // Cursor left the window - restart auto-hide timer
+                osd->cursor_inside = 0;
+                osd->last_action_time_ms = osd_get_time_ms();
                 break;
         }
     }
