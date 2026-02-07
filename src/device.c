@@ -390,6 +390,7 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
 
                     if (err == LIBUSB_ERROR_TIMEOUT) {
                         // Normal timeout - just continue to process OSD events
+                        err = 0;  // Reset err so loop continues
                         continue;
                     }
                     if (err == LIBUSB_ERROR_PIPE)
