@@ -385,10 +385,13 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                         }
                     }
 
-                    err = libusb_interrupt_transfer(handle, 0x81, data, sizeof(data), NULL, 0);
+                    // Use 50ms timeout to allow OSD event processing (dragging, etc.)
+                    err = libusb_interrupt_transfer(handle, 0x81, data, sizeof(data), NULL, 50);
 
-                    if (err == LIBUSB_ERROR_TIMEOUT)
-                        printf("\nTIMEDOUT\n");
+                    if (err == LIBUSB_ERROR_TIMEOUT) {
+                        // Normal timeout - just continue to process OSD events
+                        continue;
+                    }
                     if (err == LIBUSB_ERROR_PIPE)
                         printf("\nPIPE ERROR\n");
                     if (err == LIBUSB_ERROR_NO_DEVICE)

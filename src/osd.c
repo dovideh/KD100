@@ -301,6 +301,7 @@ void osd_set_mode(osd_state_t* osd, osd_mode_t mode) {
     XResizeWindow(dpy, win, osd->width, osd->height);
     XMapWindow(dpy, win);
     XRaiseWindow(dpy, win);
+    XFlush(dpy);
 
     osd_redraw(osd);
 }
