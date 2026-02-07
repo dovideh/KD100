@@ -515,10 +515,6 @@ void osd_redraw(osd_state_t* osd) {
         }
     }
 
-    if (font) {
-        XFreeFont(dpy, font);
-    }
-
     XFlush(dpy);
 }
 
