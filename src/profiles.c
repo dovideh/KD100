@@ -238,6 +238,15 @@ int profile_set_default(profile_manager_t* manager, const char* name) {
 }
 
 // Update profile manager - check active window and switch if needed
+//
+// Profile matching behavior:
+//   1. If window matches a profile pattern, switch to highest-priority match
+//   2. If no pattern matches but a default profile exists, switch to default
+//   3. If no pattern matches and no default profile exists, keep current
+//      profile active ("sticky" behavior -- see docs/PROFILES_DESIGN.md)
+//
+// NOTE: Currently no visual feedback is given on profile switch (debug only).
+// Planned: OSD notification "Profile: <name>" on switch.
 int profile_manager_update(profile_manager_t* manager) {
     if (manager == NULL || manager->window_tracker == NULL) return -1;
 
@@ -277,9 +286,14 @@ int profile_manager_update(profile_manager_t* manager) {
         }
     }
 
-    // Use default profile if no match
+    // Use default profile if no match; if no default either, keep current
+    // profile active (sticky behavior -- do not reset to -1)
     if (best_index < 0) {
         best_index = default_index;
+    }
+    if (best_index < 0) {
+        // No match and no default profile: keep current profile (sticky)
+        return 0;
     }
 
     // Check if profile changed
