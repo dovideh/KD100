@@ -366,8 +366,9 @@ void osd_set_mode(osd_state_t* osd, osd_mode_t mode) {
 }
 
 // Record a key action
+// button_index: 0-18 for button actions, -1 for system messages (e.g., profile switch)
 void osd_record_action(osd_state_t* osd, int button_index, const char* action) {
-    if (osd == NULL || button_index < 0 || button_index > 18) return;
+    if (osd == NULL || button_index < -1 || button_index > 18) return;
 
     // Get next slot in circular buffer
     int slot = osd->recent_head;
@@ -381,14 +382,21 @@ void osd_record_action(osd_state_t* osd, int button_index, const char* action) {
     // Store new action
     long now = osd_get_time_ms();
     osd->recent_actions[slot].button_index = button_index;
-    osd->recent_actions[slot].key_name = strdup(BUTTON_NAMES[button_index]);
+    if (button_index >= 0) {
+        osd->recent_actions[slot].key_name = strdup(BUTTON_NAMES[button_index]);
+    } else {
+        // System message (e.g., profile switch) -- no button name
+        osd->recent_actions[slot].key_name = strdup("*");
+    }
     osd->recent_actions[slot].action = action ? strdup(action) : strdup("(unknown)");
     osd->recent_actions[slot].timestamp_ms = now;
     osd->last_action_time_ms = now;
 
-    // Track active button for highlighting
-    osd->active_button = button_index;
-    osd->active_button_time_ms = now;
+    // Track active button for highlighting (only for real buttons)
+    if (button_index >= 0) {
+        osd->active_button = button_index;
+        osd->active_button_time_ms = now;
+    }
 
     // Auto-show OSD if hidden and auto_show is enabled
     if (osd->mode == OSD_MODE_HIDDEN && osd->auto_show && osd->display != NULL) {
@@ -517,11 +525,16 @@ static int draw_recent_actions(Display* dpy, Window win, GC gc, osd_state_t* osd
         if (age > osd->display_duration_ms && osd->display_duration_ms > 0) continue;
 
         char line[128];
-        const char* desc = osd->key_descriptions[action->button_index];
-        if (desc && strlen(desc) > 0) {
-            snprintf(line, sizeof(line), "%s - %s (%s)", action->key_name, desc, action->action);
+        if (action->button_index < 0) {
+            // System message (e.g., "Profile: Krita") -- show action text directly
+            snprintf(line, sizeof(line), "%s", action->action);
         } else {
-            snprintf(line, sizeof(line), "%s - (%s)", action->key_name, action->action);
+            const char* desc = osd->key_descriptions[action->button_index];
+            if (desc && strlen(desc) > 0) {
+                snprintf(line, sizeof(line), "%s - %s (%s)", action->key_name, desc, action->action);
+            } else {
+                snprintf(line, sizeof(line), "%s - (%s)", action->key_name, action->action);
+            }
         }
 
         // Fade out effect
