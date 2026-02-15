@@ -1147,8 +1147,8 @@ int profile_manager_load_dir(profile_manager_t* manager, const char* dirpath) {
         if (namelen < 5) continue;
         if (strcasecmp(entry->d_name + namelen - 4, ".cfg") != 0) continue;
 
-        // Build full path
-        char filepath[MAX_PROFILE_PATH];
+        // Build full path (dir + "/" + name, both bounded)
+        char filepath[MAX_PROFILE_PATH + 256 + 2];
         snprintf(filepath, sizeof(filepath), "%s/%s", resolved, entry->d_name);
 
         // Check it's a regular file
@@ -1234,7 +1234,7 @@ int profile_manager_check_reload(profile_manager_t* manager) {
             // Only process .cfg files
             size_t namelen = strlen(ev->name);
             if (namelen >= 5 && strcasecmp(ev->name + namelen - 4, ".cfg") == 0) {
-                char filepath[MAX_PROFILE_PATH];
+                char filepath[MAX_PROFILE_PATH + 256 + 2];
                 snprintf(filepath, sizeof(filepath), "%s/%s", manager->profiles_dir, ev->name);
 
                 if (ev->mask & (IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE)) {

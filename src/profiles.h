@@ -9,7 +9,7 @@
 #define MAX_PROFILES 32
 
 // Maximum path length for profile directory/files
-#define MAX_PROFILE_PATH 512
+#define MAX_PROFILE_PATH 1024
 
 // ============================================================================
 // PROFILE SYSTEM ARCHITECTURE
