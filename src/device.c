@@ -40,7 +40,7 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
     if (debug > 0) {
         if (debug > 2)
             debug = 2;
-        printf("Version 1.7.1 - Leader Key Descriptions\n");
+        printf("Version 1.7.2 - Profile System Overhaul\n");
         printf("Debug level: %d\n", debug);
     }
 
@@ -105,8 +105,8 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
         }
     }
 
-    // Initialize profile manager if profiles file is configured
-    if (config->profile.profiles_file) {
+    // Initialize profile manager if profiles are configured (directory or file)
+    if (config->profile.profiles_dir || config->profile.profiles_file) {
         profile_manager = profile_manager_create(config);
         if (profile_manager != NULL) {
             profile_manager_set_debug(profile_manager, debug);
@@ -114,14 +114,32 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
             // Initialize with shared display if OSD is enabled
             void* shared_display = osd ? osd->display : NULL;
             if (profile_manager_init(profile_manager, shared_display, osd) == 0) {
-                // Load profiles from file
-                if (profile_manager_load(profile_manager, config->profile.profiles_file) == 0) {
-                    printf("Profiles: Loaded from %s\n", config->profile.profiles_file);
-                    if (debug) {
-                        profile_manager_print(profile_manager);
+                int profiles_loaded = 0;
+
+                // Prefer profiles_dir (apps.profiles.d/) over monolithic profiles_file
+                if (config->profile.profiles_dir) {
+                    if (profile_manager_load_dir(profile_manager, config->profile.profiles_dir) == 0) {
+                        profiles_loaded = 1;
+                        // Start hot reload watcher on the directory
+                        profile_manager_watch_start(profile_manager, config->profile.profiles_dir);
+                    } else if (config->profile.profiles_file) {
+                        printf("Profiles: Directory load failed, falling back to %s\n",
+                               config->profile.profiles_file);
                     }
-                } else {
-                    printf("Profiles: Failed to load from %s\n", config->profile.profiles_file);
+                }
+
+                // Fall back to monolithic profiles.cfg if directory didn't work
+                if (!profiles_loaded && config->profile.profiles_file) {
+                    if (profile_manager_load(profile_manager, config->profile.profiles_file) == 0) {
+                        printf("Profiles: Loaded from %s\n", config->profile.profiles_file);
+                        profiles_loaded = 1;
+                    } else {
+                        printf("Profiles: Failed to load from %s\n", config->profile.profiles_file);
+                    }
+                }
+
+                if (profiles_loaded && debug) {
+                    profile_manager_print(profile_manager);
                 }
             } else {
                 printf("Profiles: Failed to initialize manager\n");
@@ -358,7 +376,7 @@ void device_run(libusb_context* ctx, config_t* config, int debug, int accept, in
                 }
 
                 printf("Driver is running!\n");
-                printf("Enhanced Leader Key System v1.7.1\n");
+                printf("Enhanced Leader Key System v1.7.2\n");
                 printf("Mode: %s | Timeout: %d ms\n",
                        leader_mode_to_string(config->leader.mode), config->leader.timeout_ms);
                 printf("Wheel Mode: %s", config->wheel_mode == WHEEL_MODE_SEQUENTIAL ? "sequential" : "sets");

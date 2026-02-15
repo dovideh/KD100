@@ -7,7 +7,7 @@ DIR = $(shell pwd)
 HOME = "/home/"$(shell logname)
 TARGET = KD100
 DEBUG_TARGET = KD100-debug
-VERSION = 1.7.1
+VERSION = 1.7.2
 
 # Source files
 SRC_DIR = src

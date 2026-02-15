@@ -38,7 +38,8 @@ typedef struct {
 
 // Profile configuration (for referencing profile files)
 typedef struct {
-    char* profiles_file;      // Path to profiles configuration file
+    char* profiles_file;      // Path to monolithic profiles.cfg (backward compatible)
+    char* profiles_dir;       // Path to apps.profiles.d/ directory (preferred, takes precedence)
     int auto_switch;          // Enable automatic profile switching
     int check_interval_ms;    // How often to check active window (default 500ms)
 } profile_config_t;

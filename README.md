@@ -6,35 +6,42 @@ Originally forked from [mckset/KD100](https://github.com/mckset/KD100), now inde
 
 A simple driver for the Huion KD100 mini Keydial written in C to give the device some usability while waiting for Huion to fix their Linux drivers. Each button can be configured to either act as a key/multiple keys or to execute a program/command.
 
-**Version 1.7.1** adds leader key descriptions — per-button labels that swap in when the leader key is active, shown in the expanded OSD keyboard layout. Also includes all v1.7.0 enhancements: active button highlighting, wheel function descriptions, wheel set indicators, leader key visual feedback, and action aggregation.
+**Version 1.7.2** adds per-application profiles with overlay semantics, directory-based profile configuration (`apps.profiles.d/`), inotify hot reload, OSD profile switch notifications, and consistency checking.
 
 > **NOTICE:** When updating from **v1.31** or below, make sure you updated your config file to follow the new format shown in the default config file.
 
 ## Features
-- **Leader Key Descriptions (v1.7.1)**: Per-button descriptions that swap in when leader is active
-- **Wheel Function Descriptions (v1.7.0)**: Human-readable names for wheel functions shown in OSD
-- **Active Button Highlighting (v1.7.0)**: Pressed buttons flash green in expanded keyboard layout
-- **Leader Key Visual Feedback (v1.7.0)**: Orange highlight for active leader, purple tint for eligible keys
-- **Wheel Set Indicator (v1.7.0)**: Numbered set boxes with green active highlight next to mode display
-- **Wheel Action Aggregation (v1.7.0)**: Repeated wheel turns show as single action, not per-tick
-- **Mode & Leader Status Display (v1.7.0)**: Mode, leader, and set info shown at top of both OSD views
-- **Input Validation (v1.7.0)**: Description fields sanitized (max 64 chars, printable ASCII only)
-- **On-Screen Display (v1.6.0)**: Semi-transparent overlay showing recent key actions and full keyboard layout
-- **Profile System (v1.6.0)**: Automatic configuration switching based on active window title
-- **Scalable UI (v1.6.0)**: Font size setting scales entire OSD proportionally
-- **Configurable Wheel Toggle Modes (v1.5.1)**: Choose between sequential or set-based navigation
-- **Multi-Click Detection (v1.5.1)**: Single, double, and triple-click support for wheel button
-- **Set-Based Navigation (v1.5.1)**: Organize up to 6 wheel functions into 3 sets of 2
-- **Modular Architecture (v1.5.0)**: Clean separation into focused modules for easy maintenance
-- **Enhanced Leader Key System**: Three configurable modes (one_shot, sticky, toggle)
-- **Per-button Leader Eligibility**: Control which buttons can be modified by leader
-- **hid_uclogic Compatibility**: Work with or without the hid_uclogic kernel module
-- **Advanced Debugging**: Stack traces and line numbers on crashes (debug builds)
-- **Multiple Build Targets**: Debug, release, sanitizer builds
-- **Clean Compilation**: Zero warnings with strict compiler flags
-- **Better Code Organization**: Easy to extend and maintain
 
-## Architecture (v1.7.1)
+| Feature | Version | Description |
+|---------|---------|-------------|
+| Per-App Profiles (apps.profiles.d/) | v1.7.2 | Directory-based profile configs, one `.cfg` per app, overlay semantics |
+| Profile Hot Reload | v1.7.2 | inotify-based live reload when profile files change |
+| Profile Switch Notifications | v1.7.2 | OSD shows "Profile: name" when switching configurations |
+| Consistency Checking | v1.7.2 | Validates profiles on load (bounds, duplicates, type checks) |
+| Sticky Profiles | v1.7.2 | Unmatched windows keep current profile active |
+| Leader Key Descriptions | v1.7.1 | Per-button labels that swap in when leader is active |
+| Wheel Function Descriptions | v1.7.0 | Human-readable names for wheel functions shown in OSD |
+| Active Button Highlighting | v1.7.0 | Pressed buttons flash green in expanded keyboard layout |
+| Leader Key Visual Feedback | v1.7.0 | Orange highlight for active leader, purple tint for eligible keys |
+| Wheel Set Indicator | v1.7.0 | Numbered set boxes with green active highlight next to mode display |
+| Wheel Action Aggregation | v1.7.0 | Repeated wheel turns show as single action, not per-tick |
+| Mode & Leader Status Display | v1.7.0 | Mode, leader, and set info shown at top of both OSD views |
+| Input Validation | v1.7.0 | Description fields sanitized (max 64 chars, printable ASCII only) |
+| On-Screen Display | v1.6.0 | Semi-transparent overlay showing recent key actions and full keyboard layout |
+| Profile System | v1.6.0 | Automatic configuration switching based on active window title |
+| Scalable UI | v1.6.0 | Font size setting scales entire OSD proportionally |
+| Configurable Wheel Toggle Modes | v1.5.1 | Choose between sequential or set-based navigation |
+| Multi-Click Detection | v1.5.1 | Single, double, and triple-click support for wheel button |
+| Set-Based Navigation | v1.5.1 | Organize up to 6 wheel functions into 3 sets of 2 |
+| Modular Architecture | v1.5.0 | Clean separation into focused modules for easy maintenance |
+| Enhanced Leader Key System | v1.4.9 | Three configurable modes (one_shot, sticky, toggle) |
+| Per-button Leader Eligibility | v1.4.9 | Control which buttons can be modified by leader |
+| hid_uclogic Compatibility | v1.4.5 | Work with or without the hid_uclogic kernel module |
+| Advanced Debugging | v1.4.5 | Stack traces and line numbers on crashes (debug builds) |
+| Multiple Build Targets | v1.4.5 | Debug, release, sanitizer builds |
+| Clean Compilation | v1.5.0 | Zero warnings with strict compiler flags |
+
+## Architecture (v1.7.2)
 
 The codebase is organized into focused modules:
 
@@ -49,7 +56,7 @@ src/
 ├── compat.c/h   - Hardware compatibility layer
 ├── osd.c/h      - On-screen display overlay (v1.6.0)
 ├── window.c/h   - Active window tracking (v1.6.0)
-└── profiles.c/h - Profile management system (v1.6.0)
+└── profiles.c/h - Profile management system (v1.6.0+, overlay/hot-reload v1.7.2)
 ```
 
 Each module has a single, clear responsibility, making the code easier to understand, test, and extend.
@@ -116,6 +123,105 @@ sudo ./KD100 [options]
 - `--uclogic` - Force hid_uclogic compatibility mode
 - `--no-uclogic` - Disable hid_uclogic compatibility (OpenTabletDriver mode)
 
+## Profile System (v1.7.2)
+
+### Overview
+The profile system provides automatic configuration switching based on the active window. Profiles use **overlay semantics** — they override only the parameters you specify, while everything else falls back to `default.cfg`.
+
+See `docs/PROFILES_DESIGN.md` for the full design rationale.
+
+### What Profiles Can Change
+
+| Parameter | Per-Profile? | Notes |
+|-----------|:------------:|-------|
+| Button keys/functions | Yes | Override any of buttons 0-18 |
+| Button types | Yes | Key (0), function (1), mouse (2) |
+| Wheel functions | Yes | Clockwise and counter-clockwise |
+| Key descriptions | Yes | Shown in OSD expanded view |
+| Leader descriptions | Yes | Shown when leader is active |
+| Wheel descriptions | Yes | Shown in wheel set indicator |
+| Leader config | No | Shared across all profiles |
+| OSD settings | No | Shared across all profiles |
+| Wheel mode/timeout | No | Shared across all profiles |
+| Hardware settings | No | Shared across all profiles |
+
+### Profile Switching Behavior
+
+| Scenario | Behavior |
+|----------|----------|
+| Switch to window matching a profile | Profile activates, OSD shows "Profile: name" |
+| Switch to window with no matching profile | Current profile stays active (sticky) |
+| Default profile defined (pattern `*`) | Falls back to default profile for unmatched windows |
+| Profile file modified on disk | Hot-reloaded via inotify, OSD shows reload message |
+
+### File Structure
+Profiles are configured as individual `.cfg` files in the `apps.profiles.d/` directory:
+
+```
+apps.profiles.d/
+├── krita.cfg
+├── blender.cfg
+└── gimp.cfg
+```
+
+### Profile File Format
+Each `.cfg` file defines one profile:
+
+```bash
+# apps.profiles.d/krita.cfg
+name: Krita
+pattern: *krita*
+priority: 0
+
+# Override only the buttons you want to change
+Button 0
+type: 0
+function: b
+
+Button 7
+type: 0
+function: e
+
+# Per-profile descriptions
+description_0: Brush
+description_7: Eraser
+
+# Per-profile leader descriptions
+leader_description_0: Shift+Brush
+
+# Per-profile wheel descriptions
+wheel_description_0: Brush Size
+wheel_description_1: Opacity
+```
+
+Only the buttons and descriptions you specify are overridden. Everything else comes from `default.cfg`.
+
+### Configuration
+```bash
+# In default.cfg
+
+# Preferred: directory-based profiles (one .cfg per app)
+profiles_dir: apps.profiles.d
+
+# Backward compatible: monolithic profiles file
+profiles_file: profiles.cfg
+
+# If both are set, profiles_dir takes precedence
+
+# Auto-switch when active window changes
+profile_auto_switch: true
+
+# How often to check active window (milliseconds)
+profile_check_interval: 500
+```
+
+### Pattern Matching
+- `*krita*` - Matches windows containing "krita"
+- `krita*` - Matches windows starting with "krita"
+- `*photoshop*` - Matches any window with "photoshop" in the title
+- `*` - Matches all windows (default/fallback profile)
+- Matching is case-insensitive
+
 ## Enhanced Leader Key System
 
 ### Leader Modes
@@ -123,17 +229,17 @@ The enhanced leader key system supports three modes:
 
 1. **one_shot** (default): Leader + 1 key = combination, then reset
    ```
-   Press Leader → Press Key → Send combination → Reset
+   Press Leader -> Press Key -> Send combination -> Reset
    ```
 
 2. **sticky**: Leader stays active for multiple keys until timeout
    ```
-   Press Leader → Press Key1 → Send combo → Press Key2 → Send combo → Timeout → Reset
+   Press Leader -> Press Key1 -> Send combo -> Press Key2 -> Send combo -> Timeout -> Reset
    ```
 
 3. **toggle**: Leader toggles on/off (press to enable, press again to disable)
    ```
-   Press Leader → Enable → Press Key1 → Send combo → Press Key2 → Send combo → Press Leader → Disable
+   Press Leader -> Enable -> Press Key1 -> Send combo -> Press Key2 -> Send combo -> Press Leader -> Disable
    ```
 
 ### Per-Button Eligibility
@@ -202,6 +308,7 @@ Version 1.6.0 introduces a semi-transparent on-screen display overlay, similar t
 - **Wheel Set Indicator**: Numbered boxes `[1][2][3]` next to mode, green = active set (grayed in sequential mode)
 - **Wheel Function Display**: Shows both functions in current set with `>` on the active one
 - **Wheel Action Aggregation**: Repeated wheel turns displayed as a single action
+- **Profile Switch Notifications**: Shows "Profile: name" when configuration changes (v1.7.2)
 - **Auto-Show/Hide**: Appears when keys are pressed, hides after timeout
 - **Hover Detection**: Stays visible while cursor hovers over it
 - **Draggable**: Click and drag anywhere on the window to move it
@@ -246,51 +353,6 @@ The `osd_font_size` setting acts as a scaling factor:
 - `osd_font_size: 26` - Double size (scale = 2.0)
 - All UI elements (padding, buttons, text) scale proportionally
 
-## Profile System
-
-### Overview
-Version 1.6.0 adds automatic profile switching based on the active window title. Different applications can have different key descriptions shown in the OSD.
-
-### Configuration
-Create a `profiles.cfg` file in your config directory:
-
-```bash
-# profiles.cfg - Window-based profile configuration
-
-# Profile for Krita
-[krita*]
-key_desc_0: Brush
-key_desc_1: Eraser
-key_desc_2: Move Tool
-key_desc_3: Transform
-
-# Profile for GIMP
-[*gimp*]
-key_desc_0: Paintbrush
-key_desc_1: Eraser
-key_desc_2: Move
-key_desc_3: Scale
-
-# Default profile (matches all windows)
-[*]
-key_desc_0: Key 0
-key_desc_1: Key 1
-```
-
-### Pattern Matching
-- `krita*` - Matches windows starting with "krita"
-- `*gimp*` - Matches windows containing "gimp"
-- `*` - Matches all windows (default profile)
-- Patterns are case-insensitive
-
-### Enabling Profiles
-```bash
-# In your main config file
-profiles_file: profiles.cfg
-profile_auto_switch: true
-profile_check_interval: 500  # Check every 500ms
-```
-
 ## Wheel Toggle Modes
 
 ### Overview
@@ -303,7 +365,7 @@ Classic behavior where single-click cycles through all wheel functions sequentia
 wheel_mode: sequential
 
 # Example with 5 functions:
-# Click → Function 0 → Click → Function 1 → Click → Function 2 → ... → Click → Function 0
+# Click -> Function 0 -> Click -> Function 1 -> Click -> Function 2 -> ... -> Click -> Function 0
 ```
 
 **Benefits:**
@@ -322,7 +384,7 @@ wheel_click_timeout: 300  # Time window for multi-click detection (20-990ms)
 
 **Click Behavior:**
 - **Single-click**: Toggle between the two functions in the current set
-- **Double-click**: Switch between Set 1 ↔ Set 2
+- **Double-click**: Switch between Set 1 and Set 2
 - **Triple-click**: Toggle to/from Set 3
 
 **Set Organization:**
@@ -332,12 +394,12 @@ wheel_click_timeout: 300  # Time window for multi-click detection (20-990ms)
 
 **Set Navigation:**
 ```
-Set 1 → double-click → Set 2
-Set 1 → triple-click → Set 3
-Set 2 → double-click → Set 1
-Set 2 → triple-click → Set 3
-Set 3 → double-click → Set 2
-Set 3 → triple-click → Set 1
+Set 1 -> double-click -> Set 2
+Set 1 -> triple-click -> Set 3
+Set 2 -> double-click -> Set 1
+Set 2 -> triple-click -> Set 3
+Set 3 -> double-click -> Set 2
+Set 3 -> triple-click -> Set 1
 ```
 
 **Example Configuration:**
@@ -390,17 +452,17 @@ Set 1:  > Brush Size  |    Opacity
 ```
 
 **Workflow Example:**
-1. Start in Set 1 (brush size ↔ opacity)
+1. Start in Set 1 (brush size / opacity)
 2. Single-click to toggle between brush size and opacity
-3. Double-click to jump to Set 2 (flow ↔ rotation)
-4. Triple-click to access Set 3 (scatter ↔ spacing)
+3. Double-click to jump to Set 2 (flow / rotation)
+4. Triple-click to access Set 3 (scatter / spacing)
 5. Double-click from Set 3 to return to Set 2, or triple-click to return to Set 1
 
 **Benefits:**
 - Quick access to frequently-used functions (Set 1)
 - Organized workflow by grouping related tools
 - No need to cycle through unused functions
-- Maximum 6 wheel functions (3 sets × 2 functions)
+- Maximum 6 wheel functions (3 sets x 2 functions)
 
 ### Configuration Options
 
@@ -506,28 +568,37 @@ If you encounter permission errors or device conflicts:
 
 ## Version History
 
-### v1.7.1 (Current) - Leader Key Descriptions
+### v1.7.2 (Current) - Per-App Profiles & Hot Reload
+- **Directory-Based Profiles**: New `apps.profiles.d/` directory with one `.cfg` per application
+  - Each file defines name, pattern, priority, and button/wheel/description overrides
+  - Preferred over monolithic `profiles.cfg` (backward compatible)
+- **Overlay Semantics**: Profiles override only explicitly set parameters on top of `default.cfg`
+  - Keys, wheel functions, and descriptions are per-profile
+  - Leader, OSD, wheel mode, and hardware settings remain global
+- **Hot Reload**: inotify-based file watching on `apps.profiles.d/`
+  - Profile files are automatically reloaded when modified, created, or deleted
+  - No driver restart required
+- **OSD Profile Notifications**: OSD shows "Profile: name" on profile switch
+- **Sticky Profiles**: Switching to a window without a matching profile keeps the current profile active
+- **Consistency Checking**: Validates profiles on load (duplicate names, duplicate patterns, button bounds, type validation)
+- **Configuration**: `profiles_dir: apps.profiles.d` in config file
+
+### v1.7.1 - Leader Key Descriptions
 - **Leader Key Descriptions**: New `leader_description_N` config fields for per-button labels when leader is active
   - Descriptions swap in on eligible buttons in the expanded OSD keyboard layout
   - Purple-tinted buttons show the leader description instead of the normal one
   - Input validation: max 64 chars, printable ASCII only
-- **Configuration**: `leader_description_<button_number>: <description>` in config file
-- **Version Bump**: Updated version strings across all modules
 
 ### v1.7.0 - Enhanced OSD Feedback & Wheel Descriptions
 - **Wheel Function Descriptions**: New `wheel_description_N` config fields for human-readable names
   - Shown in OSD set indicator, function pair display, and action messages
-  - Replaces inline comments after wheel function lines in config
 - **Active Button Highlighting**: Pressed buttons flash green for 500ms in expanded view
 - **Leader Key Visual Feedback**: Orange highlight on active leader button, purple tint on eligible keys
 - **Wheel Set Indicator**: Numbered `[1][2][3]` boxes next to mode line, green = active set
-  - Grayed out in sequential mode (visible but inactive)
 - **Wheel Action Aggregation**: Repeated wheel turns coalesced into single display message
 - **Mode & Leader Display**: Dedicated lines for mode+sets and leader state in both views
-  - Leader status on its own row to prevent set boxes being pushed off-screen
 - **3-Command History**: Recent actions shown in both minimal and expanded views
 - **Input Validation**: `sanitize_description()` enforces max 64 chars, printable ASCII only
-- **Layout Improvements**: Wheel info moved to top of both views; consistent shared rendering
 
 ### v1.6.0 - On-Screen Display & Profiles
 - **On-Screen Display**: Semi-transparent overlay showing key actions
@@ -542,11 +613,6 @@ If you encounter permission errors or device conflicts:
   - Automatic switching based on active window
 - **Scalable UI**: Font size scales entire interface proportionally
 - **New Modules**: osd.c/h, window.c/h, profiles.c/h
-- **Configuration Options**:
-  - `osd_enabled`, `osd_start_visible`, `osd_auto_show`
-  - `osd_position`, `osd_opacity`, `osd_display_duration`
-  - `osd_font_size` (8-32, scales UI proportionally)
-  - `profiles_file`, `profile_auto_switch`, `profile_check_interval`
 
 ### v1.5.1 - Wheel Toggle Modes
 - **Configurable Wheel Modes**: Choose between sequential or set-based navigation
@@ -554,41 +620,22 @@ If you encounter permission errors or device conflicts:
 - **Set-Based Navigation**: Organize up to 6 wheel functions into 3 sets of 2
 - **Configurable Timeout**: Adjustable multi-click detection window (20-990ms)
 - **Backward Compatible**: Defaults to sequential mode (classic behavior)
-- **Enhanced Workflow**: Group related functions for faster access
-- **Configuration Options**:
-  - `wheel_mode: sequential` - Classic cycling through all functions
-  - `wheel_mode: sets` - Set-based navigation with multi-click
-  - `wheel_click_timeout: 300` - Multi-click detection timeout in milliseconds
 
 ### v1.5.0 - Modular Architecture
 - **Complete Refactoring**: Transformed from monolithic 1,520-line file to 7 focused modules
 - **Improved Maintainability**: Clean separation of concerns across modules
-- **Better Code Organization**: Each module has a single, clear responsibility
-- **Enhanced Testability**: Modules can be tested independently
 - **Clean Compilation**: Zero warnings with `-Wall -Wextra -Wpedantic` flags
 - **Preserved Features**: 100% feature parity with v1.4.9
-- **Module Structure**:
-  - `main.c` (269 lines) - Entry point and orchestration
-  - `config.c/h` (352 lines) - Configuration parsing
-  - `device.c/h` (402 lines) - USB device handling
-  - `leader.c/h` (198 lines) - Leader key system
-  - `handler.c/h` (65 lines) - Event handling
-  - `utils.c/h` (122 lines) - Utility functions
-  - `compat.c/h` (66 lines) - Compatibility layer
 
 ### v1.4.9
 - **Enhanced Leader Key System**: Three configurable modes (one_shot, sticky, toggle)
 - **Per-button Leader Eligibility**: Control which buttons can be modified by leader
 - **Fixed Toggle Mode**: Now properly persists until explicitly disabled
-- **Fixed Config Parsing**: Each button's eligibility is now properly tracked
-- **Improved Debug Output**: Shows toggle state and mode information
 
 ### v1.4.5
 - **Crash Handler**: Advanced debugging with stack traces and line numbers
 - **hid_uclogic Compatibility**: Configurable compatibility mode
-- **Memory Management**: Proper cleanup and error handling
 - **Build System**: Multiple build targets (debug, release, sanitizers)
-- **Config Parsing**: More robust handling of config files
 
 ### v1.4
 - Basic leader key functionality
@@ -640,10 +687,11 @@ Feel free to submit issues and pull requests. When contributing code:
 
 ### Code Structure
 The modular design makes it easy to add new features:
-- Add device support → Modify `src/device.c`
-- Change key handling → Modify `src/handler.c`
-- Add config options → Modify `src/config.c`
-- Extend leader modes → Modify `src/leader.c`
+- Add device support -> Modify `src/device.c`
+- Change key handling -> Modify `src/handler.c`
+- Add config options -> Modify `src/config.c`
+- Extend leader modes -> Modify `src/leader.c`
+- Add profile support -> Add `.cfg` files to `apps.profiles.d/`
 
 ### Adding New Features
 1. Identify the appropriate module for your feature

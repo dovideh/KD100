@@ -142,6 +142,7 @@ config_t* config_create(void) {
 
     // Initialize profile settings
     config->profile.profiles_file = NULL;
+    config->profile.profiles_dir = NULL;
     config->profile.auto_switch = 1;  // Enabled by default
     config->profile.check_interval_ms = 500;
 
@@ -188,6 +189,9 @@ void config_destroy(config_t* config) {
     // Free profile settings
     if (config->profile.profiles_file != NULL) {
         free(config->profile.profiles_file);
+    }
+    if (config->profile.profiles_dir != NULL) {
+        free(config->profile.profiles_dir);
     }
 
     // Free key descriptions
@@ -419,6 +423,15 @@ int config_load(config_t* config, const char* filename, int debug) {
             if (config->profile.profiles_file) free(config->profile.profiles_file);
             config->profile.profiles_file = strdup(value);
             if (debug) printf("Config: profiles_file = %s\n", config->profile.profiles_file);
+            continue;
+        }
+
+        if (strncasecmp(line, "profiles_dir:", 13) == 0) {
+            char* value = line + 13;
+            while (*value == ' ') value++;
+            if (config->profile.profiles_dir) free(config->profile.profiles_dir);
+            config->profile.profiles_dir = strdup(value);
+            if (debug) printf("Config: profiles_dir = %s\n", config->profile.profiles_dir);
             continue;
         }
 
@@ -703,6 +716,7 @@ void config_print(const config_t* config, int debug) {
 
     printf("\n=== Profile Configuration ===\n");
     printf("Profiles file: %s\n", config->profile.profiles_file ? config->profile.profiles_file : "(none)");
+    printf("Profiles dir:  %s\n", config->profile.profiles_dir ? config->profile.profiles_dir : "(none)");
     printf("Auto switch: %s\n", config->profile.auto_switch ? "yes" : "no");
     printf("Check interval: %d ms\n", config->profile.check_interval_ms);
 
