@@ -1,10 +1,12 @@
 /*
-	V1.7.1 - Leader Key Descriptions
+	V1.7.2 - Profile System Overhaul
 	https://github.com/mckset/KD100.git
 	KD100 Linux driver for X11 desktops
 	Features:
 	- On-screen display (OSD) for key actions
-	- Profile system with window title matching
+	- Profile system with per-app overlay configs
+	- Directory-based profiles (apps.profiles.d/)
+	- Hot reload via inotify
 	- Collapsible OSD (minimal/expanded modes)
 	- Draggable OSD overlay
 	- Wildcard pattern matching for profiles
@@ -169,15 +171,13 @@ int main(int args, char *in[]) {
             printf("\t-d [-d]\t\tEnable debug outputs (use twice to view data sent by the device)\n");
             printf("\t-dry \t\tDisplay data sent by the device without sending events\n");
             printf("\t-h\t\tDisplays this message\n");
-            printf("\nNew in v1.7.1 - LEADER KEY DESCRIPTIONS:\n");
-            printf("\t• Wheel function descriptions (wheel_description_N: name)\n");
-            printf("\t• Active button highlighting in expanded keyboard layout\n");
-            printf("\t• Leader key visual feedback (orange/purple indicators)\n");
-            printf("\t• Wheel set indicator with active set highlight\n");
-            printf("\t• Wheel action aggregation (no repeated messages on turn)\n");
-            printf("\t• Mode and leader status display in both OSD views\n");
-            printf("\t• 3-command history in both minimal and expanded views\n");
-            printf("\t• Input validation for description fields (max 64 chars)\n");
+            printf("\nNew in v1.7.2 - PROFILE SYSTEM OVERHAUL:\n");
+            printf("\t• Per-app profiles in apps.profiles.d/ directory\n");
+            printf("\t• Overlay semantics (only override keys, wheel, descriptions)\n");
+            printf("\t• Hot reload via inotify (edit profiles while running)\n");
+            printf("\t• OSD notification on profile switch\n");
+            printf("\t• Sticky profiles (keeps config when switching to unmatched windows)\n");
+            printf("\t• Consistency checking (duplicate names, bounds, type validation)\n");
             printf("\nConfiguration:\n");
             printf("\tAdd 'enable_uclogic: true' to config to work with hid_uclogic loaded\n");
             printf("\tDefault: enable_uclogic: false (compatible with OpenTabletDriver)\n\n");
@@ -249,8 +249,8 @@ int main(int args, char *in[]) {
         }
     }
 
-    printf("\nKD100 Driver v1.7.1 - Leader Key Descriptions\n");
-    printf("Features: OSD overlay | Profile switching | Wheel descriptions | Leader descriptions | Button highlighting\n\n");
+    printf("\nKD100 Driver v1.7.2 - Profile System Overhaul\n");
+    printf("Features: OSD overlay | Per-app profiles | Hot reload | Overlay configs | Leader descriptions\n\n");
 
     // Run device handler
     device_run(ctx, config, debug, accept, dry);
