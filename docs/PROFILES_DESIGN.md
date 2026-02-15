@@ -306,31 +306,37 @@ loop iteration, same as the profile check interval.
 
 ---
 
-## 3. Migration Path
+## 3. Implementation Status
 
-### Phase 1: Overlay semantics
-- Modify `profile_manager_get_config()` to return a merged config (default
-  overlaid with profile-specific overrides) instead of a full replacement.
-- Keep `profiles.cfg` format working during transition.
+All phases are implemented as of v1.8.0:
 
-### Phase 2: Directory-based profiles
-- Add `profiles_dir:` config option pointing to `apps.profiles.d/`.
-- Implement per-file loading with the same overlay semantics.
-- Keep `profiles_file:` working for backward compatibility.
+- **Overlay semantics:** `config_merge()` in `profiles.c` builds a merged
+  config (default overlaid with profile overrides). Only keys, wheel, and
+  descriptions are overlaid. Leader, OSD, wheel_mode, and hardware settings
+  are copied from the base config unchanged.
 
-### Phase 3: Visual feedback
-- Add `osd_record_action(osd, -1, "Profile: Krita")` on profile switch.
-- Add profile name display to OSD expanded view header.
+- **Directory-based profiles:** `profile_manager_load_dir()` scans
+  `apps.profiles.d/` for `.cfg` files. Each file is parsed for `name:`,
+  `pattern:`, `priority:`, button/wheel overrides, and descriptions.
+  The `profiles_dir:` config option points to the directory.
 
-### Phase 4: Hot reload
-- Add `inotify` monitoring for the profiles directory.
-- Integrate into the main event loop.
-- Add consistency re-checking on reload.
+- **Visual feedback:** `apply_profile_to_osd()` calls
+  `osd_record_action(osd, -1, "Profile: Krita")` on profile switch.
 
-### Phase 5: Deprecate monolithic format
-- Log a deprecation warning when `profiles_file:` is used.
-- Provide a migration script (`profiles-migrate.sh`) that splits
+- **Hot reload:** `profile_manager_watch_start()` sets up non-blocking
+  `inotify` on the profiles directory. `profile_manager_check_reload()`
+  is called from `profile_manager_update()` on each event loop iteration.
+  File modifications, creations, and deletions are all handled.
+
+- **Backward compatibility:** If `profiles_dir:` is set, it takes precedence.
+  If it fails or is not set, `profiles_file:` is used as fallback. Both
+  formats continue to work.
+
+### Future work
+- Add a migration script (`profiles-migrate.sh`) that splits a monolithic
   `profiles.cfg` into individual files in `apps.profiles.d/`.
+- Add debouncing for inotify events (text editors often write via temp files).
+- Add profile name display to OSD expanded view header area.
 
 ---
 
